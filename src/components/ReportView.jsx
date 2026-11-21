@@ -76,11 +76,6 @@ export default function ReportView({ report, evidence, onClose }) {
         </header>
 
         {/* ---------- At a glance ---------- */}
-        {evidence.demo && (
-          <div className="report-banner warn demo-banner" role="note">
-            <b>DEMO DATA</b> — this report uses synthetic geometry generated for testing. It is not USF data; do not cite these figures as real campus measurements.
-          </div>
-        )}
         <section className="hero" aria-label="Project at a glance">
           <div className="hero-kicker">THE PROJECT IN ONE LINE</div>
           <p className="hero-headline">{headline}</p>

@@ -109,16 +109,6 @@ export function renderReportPdf(report, paper = 'letter') {
   );
   doc.moveDown(0.6);
 
-  if (evidence.demo) {
-    const msg = 'DEMO DATA - synthetic geometry generated for testing. It is NOT USF data; do not cite these figures as real campus measurements.';
-    const h = doc.heightOfString(msg, { width: W - 20 }) + 14;
-    need(h + 6);
-    const y = doc.y;
-    doc.roundedRect(L, y, W, h, 4).fill(C.amberBg);
-    doc.font('Helvetica-Bold').fontSize(9).fillColor(C.amber).text(msg, L + 10, y + 7, { width: W - 20 });
-    doc.y = y + h + 8;
-  }
-
   // ---------------- hero (at a glance) ----------------
   const stats = pickStats(evidence);
   const headline = p.headline || p.executive_summary;
@@ -239,7 +229,7 @@ export function renderReportPdf(report, paper = 'letter') {
     const y = doc.page.height - 34;
     doc.moveTo(L, y - 6).lineTo(L + W, y - 6).lineWidth(0.4).strokeColor(C.line).stroke();
     doc.font('Helvetica').fontSize(7).fillColor(C.gray)
-      .text(`BULLS ECOOPS - independent student prototype, not an official USF recommendation - ${SCENARIO_LABEL}S${evidence.demo ? ' - DEMO DATA' : ''}`, L, y, { width: W - 70, lineBreak: false });
+      .text(`BULLS ECOOPS - independent student prototype, not an official USF recommendation - ${SCENARIO_LABEL}S`, L, y, { width: W - 70, lineBreak: false });
     doc.text(`Page ${i + 1} of ${range.count}`, L + W - 66, y, { width: 66, align: 'right', lineBreak: false });
     doc.page.margins.bottom = prev;
   }

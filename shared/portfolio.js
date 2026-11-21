@@ -66,7 +66,6 @@ export function buildPortfolioEvidence(plans) {
     siteName: `Campus portfolio (${sites.length} site${sites.length > 1 ? 's' : ''})`,
     mission,
     intervention: 'portfolio',
-    ...(sites.some((s) => s.evidence.demo) ? { demo: true } : {}),
     metrics,
     sourceIds: [...sourceIds],
     assumptions,
@@ -89,12 +88,12 @@ export function buildPortfolioFallback(evidence) {
 
   const takeaways = scenarios.slice(0, 3).map((s) => `${s.label.replace(` (${SCENARIO_LABEL})`, '')}: ${fmt(s.value)} ${s.unit}.`);
   return {
-    title: `${evidence.demo ? 'DEMO - ' : ''}${evidence.siteName} — integrated sustainability screening proposal`,
+    title: `${evidence.siteName} — integrated sustainability screening proposal`,
     headline: scenarios.length
       ? `${fmt(m.get('tot.sites').value, 0)} USF sites screened together: ${scenarios[0].label.replace(` (${SCENARIO_LABEL})`, '').toLowerCase()} of ${fmt(scenarios[0].value)} ${scenarios[0].unit}.`
       : `${fmt(m.get('tot.sites').value, 0)} USF sites screened together.`,
     key_takeaways: takeaways,
-    executive_summary: `${evidence.demo ? 'DEMO DATA (synthetic geometry, not USF data). ' : ''}This portfolio combines several candidate campus sites. All totals are summed in code from public GIS geometry and declared assumptions; every scenario output is a ${SCENARIO_LABEL}, not a measured benefit.`,
+    executive_summary: `This portfolio combines several candidate campus sites. All totals are summed in code from public GIS geometry and declared assumptions; every scenario output is a ${SCENARIO_LABEL}, not a measured benefit.`,
     problem_statement: 'Early campus sustainability ideas need a defensible site baseline and visible assumptions before any design work.',
     intervention: 'A set of screened sites for solar shade, rainwater capture and/or green-corridor interventions.',
     baseline_claims: baseline,
@@ -103,7 +102,7 @@ export function buildPortfolioFallback(evidence) {
     implementation_steps: ['Review the portfolio with Facilities and a faculty or student-organization sponsor.', 'Collect a measured baseline per site.', 'Sequence sites into a phased concept proposal with cost, maintenance and compliance review.'],
     reviews_required: ['Facilities and campus planning review', 'Structural and electrical interconnection engineering review', 'Stormwater / drainage and soil infiltration assessment', 'Campus arborist and accessibility review'],
     monitoring_plan: [{ metric: 'Per-site baseline and installed performance', method: 'Meter readings and field measurements after install (not available in this prototype)', cadence: 'Monthly' }],
-    limitations: [...(evidence.demo ? ['This report uses synthetic DEMO geometry generated for testing; it is not USF data.'] : []), SCREENING_DISCLAIMER, 'No hydrological model, structural review, grid interconnection analysis or shade-hour simulation was performed.', 'Totals are sums of per-site screening estimates.'],
+    limitations: [SCREENING_DISCLAIMER, 'No hydrological model, structural review, grid interconnection analysis or shade-hour simulation was performed.', 'Totals are sums of per-site screening estimates.'],
     confidence: 'partial',
   };
 }

@@ -9,7 +9,7 @@ const CATEGORY = {
 const SUGGESTIONS = ['Make USF a net-zero energy campus', 'Cooler walkways for students', 'Water-smart parking lots', 'Student-funded green projects'];
 
 export default function IdeasPanel({
-  focus, onFocus, state, onBrainstorm, hasScan, siteNames, onOpenSite, onAddSite, health, demo,
+  focus, onFocus, state, onBrainstorm, hasScan, siteNames, onOpenSite, onAddSite, health,
 }) {
   const result = state.result;
   return (
@@ -19,7 +19,6 @@ export default function IdeasPanel({
         <span>Gemini studies your scan results and suggests the best ways to make USF more sustainable. Ideas that aren’t backed by scan data are labelled as general ideas.</span>
       </div>
 
-      {demo && <p className="warn-text"><b>DEMO DATA:</b> these ideas are based on synthetic test sites, not real USF buildings or lots.</p>}
       {!hasScan && <p className="warn-text">Tip: run <b>ANALYZE CAMPUS</b> first so ideas can point to specific ranked sites.</p>}
 
       <label className="focus-field">

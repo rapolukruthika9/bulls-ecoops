@@ -8,7 +8,6 @@ import {
 } from '../lib/data.js';
 import { validateCollection, featureObjectId } from '../lib/gis.js';
 import { VECTOR_KEYS } from '../lib/config.js';
-import { generateDemoCampus } from '../lib/demoData.js';
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -108,7 +107,7 @@ function addOperationalLayers(map) {
 }
 
 export default function MapView({
-  visibility, mapBase, reloadToken, demoMode, priority, selectedGeometry, proposedGeometry, popupSite, onPopupAdd, onPopupClose,
+  visibility, mapBase, reloadToken, priority, selectedGeometry, proposedGeometry, popupSite, onPopupAdd, onPopupClose,
   onStatus, onSelected, onData, onControlsReady, onMapReady,
 }) {
   const containerRef = useRef(null);
@@ -118,8 +117,6 @@ export default function MapView({
   const readyRef = useRef(false);
   const visibilityRef = useRef(visibility);
   const mapBaseRef = useRef(mapBase);
-  const demoRef = useRef(demoMode);
-  demoRef.current = demoMode;
   const popupRef = useRef(null);
   const popupCb = useRef({});
   popupCb.current = { onPopupAdd, onPopupClose };
@@ -209,25 +206,6 @@ export default function MapView({
       onSelected?.(null);
       onData?.(null); // reset
 
-      // DEMO MODE: synthetic geometry, no network. Everything is labelled as demo downstream.
-      if (demoRef.current) {
-        const demo = generateDemoCampus();
-        const bounds = calculateBounds(demo.campus);
-        campusBoundsRef.current = bounds;
-        map.getSource('campus')?.setData({ type: 'FeatureCollection', features: [demo.campus] });
-        ['canopy', 'paths', 'greenspace'].forEach((key) => map.getSource(key)?.setData(EMPTY));
-        onStatus?.('campus', 'demo', 'DEMO outline (synthetic), not the official USF boundary.');
-        const loaded = { campus: demo.campus, bounds, demo: true };
-        for (const key of ['buildings', 'parking']) {
-          const { collection, issues } = validateCollection(demo[key], { kind: 'polygon' });
-          map.getSource(key)?.setData(toFeatureCollection(collection.features));
-          loaded[key] = { collection, issues, origin: 'demo', retrievedAt: null };
-          onStatus?.(key, 'demo', `${collection.features.length.toLocaleString()} SYNTHETIC demo features (not USF data).`);
-        }
-        map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: { top: 76, right: 72, bottom: 70, left: 72 }, maxZoom: 16.2, duration: 600 });
-        onData?.(loaded);
-        return;
-      }
       ['campus', ...VECTOR_KEYS].forEach((key) => onStatus?.(key, 'loading', 'Connecting through the GIS proxy…'));
 
       try {
@@ -355,7 +333,6 @@ export default function MapView({
   }, [popupSite]);
 
   useEffect(() => { if (reloadToken > 0) loadRef.current?.(); }, [reloadToken]);
-  useEffect(() => { if (readyRef.current) loadRef.current?.(); }, [demoMode]);
 
   return <div className="maplibre-host" ref={containerRef} aria-label="Interactive USF Tampa campus satellite map" />;
 }

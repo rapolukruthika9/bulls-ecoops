@@ -108,7 +108,6 @@ export default function App() {
     buildingBufferM: DEFAULTS.buildingBufferM, parkingBufferM: DEFAULTS.parkingBufferM, athleticBufferM: DEFAULTS.athleticBufferM, minOpenAreaM2: DEFAULTS.minOpenAreaM2,
   });
   const [filterOpen, setFilterOpen] = useState(true);
-  const [demoMode, setDemoMode] = useState(() => { try { return new URLSearchParams(window.location.search).get('demo') === '1'; } catch { return false; } });
   const [heatLegend, setHeatLegend] = useState({ status: 'idle', data: null });
   const [scan, setScan] = useState({ status: 'idle', progress: null, result: null, error: null });
   const [weights, setWeights] = useState(() => JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)));
@@ -151,7 +150,7 @@ export default function App() {
       campus: data.campus,
       paths: data.paths?.collection, canopy: data.canopy?.collection, parking: data.parking?.collection,
       buildings: data.buildings?.collection, greenspace: data.greenspace?.collection,
-    }, { paths: EXTRA_LAYERS, greenspace: EXTRA_LAYERS }, { demo: Boolean(data.demo) });
+    }, { paths: EXTRA_LAYERS, greenspace: EXTRA_LAYERS });
   }, [data]);
 
   useEffect(() => { // a reload invalidates old scan results
@@ -416,7 +415,7 @@ export default function App() {
     push('c.plant_candidates', 'Open spaces found', scan.result?.plant.length, 'sites', 'src-method', 'model');
     push('c.water_candidates', 'Water candidates screened', scan.result?.water.length, 'sites', 'src-method', 'model');
     return {
-      focus: ideaFocus, demo: Boolean(data?.demo), sites, metrics: metrics.slice(0, 60),
+      focus: ideaFocus, sites, metrics: metrics.slice(0, 60),
       layers: { buildings: Boolean(engine?.available.buildings), parking: Boolean(engine?.available.parking), canopyPolygons: Boolean(engine?.available.canopy), paths: Boolean(engine?.available.paths), greenspace: Boolean(engine?.available.greenspace) },
     };
   }
@@ -432,15 +431,8 @@ export default function App() {
     }
   }
 
-  function toggleDemo() {
-    // Switching data source invalidates everything derived from the old one.
-    setPlans([]); setActiveId(null); setReport(null); setIdeas({ status: 'idle', result: null }); setPlanMessage('');
-    setSelectedId(null); setPopupOpen(false);
-    setDemoMode((d) => !d);
-  }
-
   // ---------- derived UI ----------
-  const readyCount = CORE_KEYS.filter((k) => ['ready', 'cached', 'demo'].includes(statuses[k]?.status)).length;
+  const readyCount = CORE_KEYS.filter((k) => ['ready', 'cached'].includes(statuses[k]?.status)).length;
   const errorKeys = CORE_KEYS.filter((k) => statuses[k]?.status === 'error');
   const cachedKeys = CORE_KEYS.filter((k) => statuses[k]?.status === 'cached');
   const showLegend = visibility.priority && filteredMissionRank;
@@ -473,9 +465,6 @@ export default function App() {
         </div>
         <div className="topbar-right">
           <span className="connection-pill"><StatusDot status={health ? 'ready' : 'error'} /> API {health ? `ONLINE · Gemini ${health.gemini ? 'on' : 'off'} · PVWatts ${health.pvwatts ? 'on' : 'off'}` : 'OFFLINE'}</span>
-          <button className={`demo-toggle ${demoMode ? 'on' : ''}`} onClick={toggleDemo} aria-pressed={demoMode} title="Use synthetic demo geometry instead of the live USF layers">
-            Demo data: {demoMode ? 'ON' : 'OFF'}
-          </button>
           <span className="connection-pill"><StatusDot status={mapReady ? 'ready' : 'loading'} /> MAP {mapReady ? 'READY' : 'INITIALIZING'}</span>
           <a className="official-link" href="https://maps.usf.edu/" target="_blank" rel="noopener noreferrer">USF Maps Portal ↗</a>
         </div>
@@ -550,17 +539,15 @@ export default function App() {
 
           <div className="map-frame">
             <MapView
-              visibility={visibility} mapBase={mapBase} reloadToken={0} demoMode={demoMode}
+              visibility={visibility} mapBase={mapBase} reloadToken={0}
               priority={priority} selectedGeometry={selectedCandidate?.geometry} proposedGeometry={proposedGeometry}
               popupSite={popupSite} onPopupAdd={() => addToPlan(selectedCandidate, { goToPlan: false })} onPopupClose={() => setPopupOpen(false)}
               onStatus={updateStatus} onSelected={onMapSelect} onData={setData}
               onControlsReady={setControls} onMapReady={setMapReady}
             />
-            <div className={`map-overlay-tag ${demoMode ? 'demo' : ''}`}><span className="live-dot" /> {demoMode ? 'DEMO DATA · not USF data' : 'USF TAMPA CAMPUS'}</div>
-            {!demoMode && (statuses.buildings?.status === 'error' || statuses.parking?.status === 'error') && (
-              <div className="map-banner" role="alert">
-                Live USF layers are unavailable. <button onClick={toggleDemo}>Use demo data</button>
-              </div>
+            <div className="map-overlay-tag"><span className="live-dot" /> USF TAMPA CAMPUS</div>
+            {(statuses.buildings?.status === 'error' || statuses.parking?.status === 'error') && (
+              <div className="map-banner" role="alert">Live USF layers are unavailable. Check the Data tab for the error, then press Reload.</div>
             )}
 
             {scan.status === 'done' && visibility.priority && (mission === 'solar' || mission === 'water') && (filterOpen ? (
@@ -665,7 +652,7 @@ export default function App() {
           {tab === 'ideas' && (
             <IdeasPanel
               focus={ideaFocus} onFocus={setIdeaFocus} state={ideas} onBrainstorm={brainstorm}
-              hasScan={scan.status === 'done'} siteNames={siteNames} health={health} demo={Boolean(data?.demo)}
+              hasScan={scan.status === 'done'} siteNames={siteNames} health={health}
               onOpenSite={(id) => { if (id.startsWith('path') && mission !== 'green') setMission('green'); else if (id.startsWith('openspace') && mission !== 'plant') setMission('plant'); else if ((id.startsWith('parking') || id.startsWith('building')) && (mission === 'green' || mission === 'plant')) setMission('solar'); selectSite(id, { fly: true }); setTab('scan'); }}
               onAddSite={(id) => { const c = resolveCandidate(id); if (c) addToPlan(c); }}
             />
@@ -689,7 +676,6 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                {demoMode && <p className="warn-text">Demo mode: geometry is SYNTHETIC (275 buildings and 106 lots, matching the live layer counts; sizes and positions are assumptions). Reports and PDFs are stamped DEMO DATA.</p>}
                 {!EXTRA_LAYERS && <p className="limit-text">Optional layers (canopy polygons, walkways, green space) are switched off because their servers were unreachable. Scoring uses buildings and parking; canopy, planting and heat remain available as 2021 map overlays.</p>}
               </div>
               <div className="inspector-section">
