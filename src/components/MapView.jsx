@@ -7,6 +7,7 @@ import {
   DATASETS, getFeatureFacts, getFeatureTitle, loadCampusBoundary, loadDataset, toFeatureCollection,
 } from '../lib/data.js';
 import { validateCollection, featureObjectId } from '../lib/gis.js';
+import { VECTOR_KEYS } from '../lib/config.js';
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -18,7 +19,6 @@ const PLANTING_TILE_URL = '/gis/canopy/export?bbox={bbox-epsg-3857}&bboxSR=3857&
 const LST_TILE_URL = '/gis/lst/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image&layers=show:15';
 
 const GEOJSON_SOURCES = ['campus', 'buildings', 'parking', 'canopy', 'paths', 'greenspace', 'priority-points', 'priority-shapes', 'selected', 'proposed'];
-const VECTOR_KEYS = ['buildings', 'parking', 'canopy', 'paths', 'greenspace'];
 
 // Score ramp (0–100): blue → green → yellow → red, matching a heat-map reading.
 const SCORE_COLOR = ['interpolate', ['linear'], ['coalesce', ['get', 'score'], 0],
@@ -107,7 +107,7 @@ function addOperationalLayers(map) {
 }
 
 export default function MapView({
-  visibility, mapBase, reloadToken, priority, selectedGeometry, proposedGeometry,
+  visibility, mapBase, reloadToken, priority, selectedGeometry, proposedGeometry, popupSite, onPopupAdd, onPopupClose,
   onStatus, onSelected, onData, onControlsReady, onMapReady,
 }) {
   const containerRef = useRef(null);
@@ -117,6 +117,9 @@ export default function MapView({
   const readyRef = useRef(false);
   const visibilityRef = useRef(visibility);
   const mapBaseRef = useRef(mapBase);
+  const popupRef = useRef(null);
+  const popupCb = useRef({});
+  popupCb.current = { onPopupAdd, onPopupClose };
   const dataRef = useRef({ priority, selectedGeometry, proposedGeometry });
   visibilityRef.current = visibility;
   mapBaseRef.current = mapBase;
@@ -297,6 +300,36 @@ export default function MapView({
     if (!map || !readyRef.current) return;
     map.getSource('proposed')?.setData(proposedGeometry ? { type: 'Feature', properties: {}, geometry: proposedGeometry } : EMPTY);
   }, [proposedGeometry]);
+
+  // Pop-up anchored at the selected site, with an Add-to-EcoPlan button (built with DOM APIs and
+  // textContent only, so GIS attribute text can never inject markup).
+  useEffect(() => {
+    const map = mapRef.current;
+    const closeCurrent = () => {
+      const p = popupRef.current;
+      popupRef.current = null;
+      if (p) { p.off('close', p.__onClose); p.remove(); }
+    };
+    closeCurrent();
+    if (!map || !readyRef.current || !popupSite) return closeCurrent;
+    const el = document.createElement('div');
+    el.className = 'site-popup';
+    const add = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; n.textContent = text; el.appendChild(n); return n; };
+    add('span', 'site-popup-kind', popupSite.kindLabel);
+    add('strong', 'site-popup-title', popupSite.name);
+    if (popupSite.score !== undefined) add('span', 'site-popup-score', `Screening score ${popupSite.score.toFixed(0)} · rank #${popupSite.rank}`);
+    popupSite.lines.forEach((line) => add('span', 'site-popup-line', line));
+    const button = add('button', 'site-popup-add', popupSite.inPlan ? '✓ In EcoPlan' : 'Add to EcoPlan →');
+    button.type = 'button';
+    button.disabled = popupSite.inPlan;
+    button.addEventListener('click', () => popupCb.current.onPopupAdd?.());
+    const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: '270px', offset: 14 })
+      .setLngLat([popupSite.lon, popupSite.lat]).setDOMContent(el).addTo(map);
+    popup.__onClose = () => { popupRef.current = null; popupCb.current.onPopupClose?.(); };
+    popup.on('close', popup.__onClose);
+    popupRef.current = popup;
+    return closeCurrent;
+  }, [popupSite]);
 
   useEffect(() => { if (reloadToken > 0) loadRef.current?.(); }, [reloadToken]);
 

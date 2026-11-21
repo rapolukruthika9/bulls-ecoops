@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { SOURCES } from '../shared/sources.js';
 import { SiteEvidenceSchema } from '../shared/proposal.js';
 import { GIS_UPSTREAMS, ALLOWED_GIS_PATH } from '../shared/gis-upstreams.js';
-import { generateVerifiedProposal, DEFAULT_MODEL } from './services/gemini.js';
+import { generateVerifiedProposal, generateVerifiedIdeas, DEFAULT_MODEL } from './services/gemini.js';
+import { BrainstormContextSchema } from '../shared/brainstorm.js';
 import { estimateSolar, SolarRequestSchema } from './services/pvwatts.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -82,6 +83,23 @@ export function createApp({
       return res.json({ ...result, sources, generatedAt: new Date().toISOString(), verified: true });
     } catch (error) {
       return res.status(502).json({ error: 'Proposal generation could not be verified. Review the site metrics and source links.', detail: String(error?.message || error).slice(0, 160) });
+    }
+  });
+
+  // ---------- Gemini brainstorm (Ideas tab) ----------
+  app.post('/api/brainstorm', rateLimit({
+    windowMs: 60_000, limit: perMinute, standardHeaders: true, legacyHeaders: false,
+    message: { error: `Rate limit: at most ${perMinute} brainstorm requests per minute.` },
+  }), async (req, res) => {
+    const parsed = BrainstormContextSchema.safeParse(req.body?.context);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid brainstorm context', issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join('.')}: ${i.message}`) });
+    }
+    try {
+      const result = await generateVerifiedIdeas(parsed.data, { client: geminiClient, model });
+      return res.json({ ...result, generatedAt: new Date().toISOString(), verified: true });
+    } catch (error) {
+      return res.status(502).json({ error: 'Brainstorm could not be verified.', detail: String(error?.message || error).slice(0, 160) });
     }
   });
 

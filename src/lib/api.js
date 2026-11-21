@@ -17,3 +17,4 @@ const post = (path, body) => json(path, {
 export const getHealth = () => json('/api/health');
 export const requestSolarEstimate = (body) => post('/api/solar-estimate', body);
 export const requestProposal = (evidence) => post('/api/proposal', { evidence });
+export const requestBrainstorm = (context) => post('/api/brainstorm', { context });

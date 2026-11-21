@@ -3,7 +3,8 @@ import { createApp } from './app.js';
 import { createGeminiClient } from './services/gemini.js';
 
 const PORT = Number(process.env.PORT) || 3001;
-const clean = (v) => (!v || /replace_me/i.test(v) ? '' : v);
+// Treat template text (replace_me, PLACEHOLDER…, your-key…) as "no key".
+const clean = (v) => (!v || /replace_me|^placeholder|^your[-_ ]?(api[-_ ]?)?key/i.test(v.trim()) ? '' : v.trim());
 
 const env = { ...process.env, GEMINI_API_KEY: clean(process.env.GEMINI_API_KEY), NLR_API_KEY: clean(process.env.NLR_API_KEY) };
 const app = createApp({ env, geminiClient: createGeminiClient(env.GEMINI_API_KEY) });
