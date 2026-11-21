@@ -116,7 +116,7 @@ function sumAreaDissolved(pieces) {
  * @param {{paths?:object, canopy?:object, parking?:object, buildings?:object, greenspace?:object}} data
  *   validated FeatureCollections (null/undefined when a layer is unavailable)
  */
-export function createEngine(data) {
+export function createEngine(data, expected = { paths: true, greenspace: true }) {
   const available = {
     paths: Boolean(data.paths?.features?.length),
     canopy: Boolean(data.canopy?.features?.length),
@@ -231,8 +231,9 @@ export function createEngine(data) {
     const pathDistanceM = nearestPathDistanceM(pt);
     const greenDist = greenDistanceM(pt);
     const missing = [];
-    if (!available.paths) missing.push('paths layer');
-    if (!available.greenspace) missing.push('green-space layer');
+    // Only layers the app actually expects count as "missing" (optional layers are off by default).
+    if (expected.paths && !available.paths) missing.push('paths layer');
+    if (expected.greenspace && !available.greenspace) missing.push('green-space layer');
     return {
       id: `${kind}-${objectId}`,
       objectId,

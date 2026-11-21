@@ -2,38 +2,47 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './components/MapView.jsx';
 import ScanPanel, { MISSIONS } from './components/ScanPanel.jsx';
 import PlannerPanel from './components/PlannerPanel.jsx';
+import IdeasPanel from './components/IdeasPanel.jsx';
 import ReportView from './components/ReportView.jsx';
 import { createEngine, rankAll, SITE_PREFIX, DEFAULTS } from './lib/gis.js';
-import { getHealth, requestProposal, requestSolarEstimate } from './lib/api.js';
+import { getHealth, requestBrainstorm, requestProposal, requestSolarEstimate } from './lib/api.js';
+import { EXTRA_LAYERS, VECTOR_KEYS } from './lib/config.js';
 import { DEFAULT_WEIGHTS } from '../shared/scoring.js';
 import { DEFAULT_ASSUMPTIONS, solarCapacity } from '../shared/scenarios.js';
 import { buildSiteEvidence } from '../shared/evidence.js';
 import { buildFallbackProposal } from '../shared/proposal.js';
+import { buildPortfolioEvidence, buildPortfolioFallback, MAX_PORTFOLIO_SITES } from '../shared/portfolio.js';
+import { buildFallbackIdeas } from '../shared/brainstorm.js';
 
-const LAYERS = [
+const ALL_LAYERS = [
   { key: 'priority', label: 'Priority surface (scan result)', description: 'Heat-map of screening scores for the active mission', swatch: 'priority' },
   { key: 'campus', label: 'USF Tampa campus boundary', description: 'Official USF campus polygon', swatch: 'campus' },
   { key: 'buildings', label: 'Building footprints', description: 'USF Facilities GIS · layer 1', swatch: 'buildings' },
   { key: 'parking', label: 'Surface parking lots', description: 'USF Parking GIS · layer 1', swatch: 'parking' },
-  { key: 'paths', label: 'Sidewalks / footpaths', description: 'USF Community Maps · layer 11', swatch: 'paths' },
-  { key: 'greenspace', label: 'Campus green space', description: 'USF Community Maps · layer 18', swatch: 'greenspace' },
-  { key: 'canopy', label: 'Existing tree canopy', description: 'Tampa UTC polygons · 2021', swatch: 'canopy' },
+  { key: 'paths', label: 'Sidewalks / footpaths', description: 'USF Community Maps · layer 11', swatch: 'paths', extra: true },
+  { key: 'greenspace', label: 'Campus green space', description: 'USF Community Maps · layer 18', swatch: 'greenspace', extra: true },
+  { key: 'canopy', label: 'Existing tree canopy', description: 'Tampa UTC 2021 study (map overlay)', swatch: 'canopy' },
   { key: 'planting', label: 'Potential planting zones', description: 'Tampa UTC study layer 10 · 2021', swatch: 'planting' },
   { key: 'heat', label: 'Historical heat zones', description: 'Average land-surface temperature · 2021', swatch: 'heat' },
 ];
+// Optional layers (failing servers) are hidden unless VITE_ENABLE_EXTRA_LAYERS=true.
+const LAYERS = ALL_LAYERS.filter((l) => !l.extra || EXTRA_LAYERS);
 
-const ALL_OFF = Object.fromEntries(LAYERS.map((l) => [l.key, false]));
+const ALL_OFF = Object.fromEntries(ALL_LAYERS.map((l) => [l.key, false]));
 const PRESETS = {
   green: { ...ALL_OFF, campus: true, canopy: true, paths: true, greenspace: true, planting: true, priority: true },
+  greenlens: { ...ALL_OFF, campus: true, canopy: true, planting: true },
   water: { ...ALL_OFF, campus: true, buildings: true, parking: true, greenspace: true, priority: true },
   solar: { ...ALL_OFF, campus: true, buildings: true, parking: true, paths: true, priority: true },
   heat: { ...ALL_OFF, campus: true, heat: true },
 };
-const CORE_KEYS = ['campus', 'buildings', 'parking', 'canopy', 'paths', 'greenspace'];
-const VECTOR_LABEL = Object.fromEntries(LAYERS.map((l) => [l.key, l.label]));
+const CORE_KEYS = ['campus', ...VECTOR_KEYS];
+const VECTOR_LABEL = Object.fromEntries(ALL_LAYERS.map((l) => [l.key, l.label]));
 
 const MISSION_BUTTONS = [
-  { key: 'green', icon: '♧', label: 'Green', sub: 'Canopy gaps on walkways' },
+  EXTRA_LAYERS
+    ? { key: 'green', icon: '♧', label: 'Green', sub: 'Canopy gaps on walkways' }
+    : { key: 'greenlens', icon: '♧', label: 'Green zones', sub: '2021 canopy & planting study' },
   { key: 'water', icon: '◍', label: 'Water', sub: 'Roof & paved catchments' },
   { key: 'solar', icon: '▦', label: 'Parking & solar', sub: 'Lots and roofs' },
   { key: 'heat', icon: '☼', label: 'Heat areas', sub: '2021 surface-temp study' },
@@ -65,8 +74,13 @@ function defaultComponents(candidate, mission) {
   return mission === 'water' ? ['rainwater'] : ['solar'];
 }
 
+const PV_KEYS = ['usableFractionPct', 'panelDensityKwdcPerM2', 'pvTiltDeg', 'pvAzimuthDeg', 'pvLossesPct'];
+const KIND_LABEL = { path: 'WALKWAY', parking: 'PARKING LOT', building: 'BUILDING' };
+const fmtN = (v, d = 0) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d });
+
 export default function App() {
-  const [visibility, setVisibility] = useState({ ...PRESETS.solar, canopy: true, paths: true, priority: true });
+  const [visibility, setVisibility] = useState({ ...PRESETS.solar, canopy: true });
+  const [lens, setLens] = useState('solar');
   const [statuses, setStatuses] = useState(() => ({
     ...Object.fromEntries(CORE_KEYS.map((k) => [k, { status: 'loading', message: 'Waiting for query.' }])),
     planting: { status: 'ready', message: 'USF Water Institute potential-planting layer 10; raster overlay loads on demand.' },
@@ -85,14 +99,18 @@ export default function App() {
   const [scan, setScan] = useState({ status: 'idle', progress: null, result: null, error: null });
   const [weights, setWeights] = useState(() => JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)));
   const [selectedId, setSelectedId] = useState(null);
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [pf, setPf] = useState({ kind: 'all', topOnly: false, topPct: 25 });
 
-  const [planCandidate, setPlanCandidate] = useState(null);
-  const [components, setComponents] = useState([]);
-  const [assumptions, setAssumptions] = useState({ ...DEFAULT_ASSUMPTIONS });
-  const [pv, setPv] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [planMessage, setPlanMessage] = useState('');
   const [pvState, setPvState] = useState({ status: 'idle' });
   const [proposalState, setProposalState] = useState({ status: 'idle' });
   const [report, setReport] = useState(null);
+
+  const [ideaFocus, setIdeaFocus] = useState('');
+  const [ideas, setIdeas] = useState({ status: 'idle', result: null });
   const scanAbort = useRef(null);
 
   useEffect(() => { getHealth().then(setHealth).catch(() => setHealth(null)); }, []);
@@ -107,13 +125,14 @@ export default function App() {
     return createEngine({
       paths: data.paths?.collection, canopy: data.canopy?.collection, parking: data.parking?.collection,
       buildings: data.buildings?.collection, greenspace: data.greenspace?.collection,
-    });
+    }, { paths: EXTRA_LAYERS, greenspace: EXTRA_LAYERS });
   }, [data]);
 
   useEffect(() => { // a reload invalidates old scan results
     scanAbort.current?.abort();
     setScan({ status: 'idle', progress: null, result: null, error: null });
     setSelectedId(null);
+    setPopupOpen(false);
   }, [data]);
 
   const blockers = useMemo(() => {
@@ -147,109 +166,238 @@ export default function App() {
   const ranked = useMemo(() => (scan.result ? rankAll(scan.result, weights) : null), [scan.result, weights]);
   const missionRank = ranked?.[mission];
 
-  // Priority surface for the map: heat-map points + exact scored shapes for the active mission.
-  const priority = useMemo(() => {
+  // Priority filter: parking / buildings / all, optionally only the top slice (solar & water missions).
+  const filteredMissionRank = useMemo(() => {
     if (!missionRank) return null;
+    let list = missionRank.ranked;
+    if (mission !== 'green') {
+      if (pf.kind !== 'all') list = list.filter((c) => c.kind === pf.kind);
+      if (pf.topOnly && list.length) list = list.slice(0, Math.max(1, Math.ceil((list.length * pf.topPct) / 100)));
+    }
+    return { ...missionRank, ranked: list };
+  }, [missionRank, mission, pf]);
+  const viewRanked = useMemo(() => (ranked ? { ...ranked, [mission]: filteredMissionRank } : null), [ranked, mission, filteredMissionRank]);
+
+  // Priority surface for the map: heat-map points + exact scored shapes for the active filter.
+  const priority = useMemo(() => {
+    if (!filteredMissionRank) return null;
     const points = []; const shapes = [];
-    for (const c of missionRank.ranked) {
+    for (const c of filteredMissionRank.ranked) {
       const props = { score: c.score, id: c.id, rank: c.rank, layerKey: c.layerKey, __oid: c.objectId, name: c.name };
       points.push({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [c.lon, c.lat] } });
       shapes.push({ type: 'Feature', properties: props, geometry: c.geometry });
     }
     return { points: { type: 'FeatureCollection', features: points }, shapes: { type: 'FeatureCollection', features: shapes } };
-  }, [missionRank]);
+  }, [filteredMissionRank]);
 
   // ---------- selection ----------
-  const selectedCandidate = useMemo(() => {
-    if (!selectedId) return null;
-    const inRank = missionRank?.ranked.find((c) => c.id === selectedId);
-    if (inRank) return inRank;
+  function resolveCandidate(id, preferMission = mission) {
+    if (!id) return null;
+    for (const m of ['solar', 'water', 'green']) {
+      const hit = ranked?.[m]?.ranked.find((c) => c.id === id);
+      if (hit && (m === preferMission || !ranked?.[preferMission]?.ranked.some((c) => c.id === id))) return hit;
+    }
     if (!engine || !data) return null;
-    const [prefix, ...rest] = selectedId.split('-');
+    const [prefix, ...rest] = id.split('-');
     const objectId = rest.join('-');
     const layerKey = Object.keys(SITE_PREFIX).find((k) => SITE_PREFIX[k] === prefix);
     const feature = data[layerKey]?.collection.features.find((f) => f.properties.__oid === objectId);
     if (!feature) return null;
     try {
       const c = layerKey === 'paths' ? engine.analyzePath(feature, { bufferM: settings.bufferM }) : engine.analyzeSite(feature, layerKey, settings);
-      return c ? { ...c, mission: layerKey === 'paths' ? 'green' : (mission === 'water' ? 'water' : 'solar') } : null;
+      return c ? { ...c, mission: layerKey === 'paths' ? 'green' : (preferMission === 'water' ? 'water' : 'solar') } : null;
     } catch { return null; }
-  }, [selectedId, missionRank, engine, data, settings, mission]);
+  }
+  const selectedCandidate = useMemo(() => resolveCandidate(selectedId), [selectedId, ranked, engine, data, settings, mission]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function selectSite(id, { fly = false, popup = true } = {}) {
+    setSelectedId(id);
+    setPopupOpen(popup);
+    setTab((t) => (t === 'plan' || t === 'ideas' ? t : 'scan'));
+    if (fly) {
+      const c = resolveCandidate(id);
+      if (c) controls?.flyToGeometry(c.geometry);
+    }
+  }
 
   function onMapSelect(info) {
     setInspected(info);
     if (info && SITE_PREFIX[info.layerKey]) {
       const kind = SITE_PREFIX[info.layerKey];
-      setSelectedId(`${kind}-${info.objectId}`);
       if (kind === 'path' && mission !== 'green') setMission('green');
       if (kind !== 'path' && mission === 'green') setMission('solar');
+      setSelectedId(`${kind}-${info.objectId}`);
+      setPopupOpen(true);
       setTab('scan');
     }
   }
 
   function switchMission(key) {
-    if (key !== 'heat') setMission(key);
+    setLens(key);
     setVisibility(PRESETS[key]);
-    if (key !== 'heat') setTab('scan');
-    if (key !== 'heat' && selectedCandidate && selectedCandidate.mission !== key) setSelectedId(null);
-  }
-
-  // ---------- planner ----------
-  function addToPlan() {
-    const c = selectedCandidate;
-    if (!c) return;
-    setPlanCandidate(c);
-    setComponents(defaultComponents(c, mission));
-    setAssumptions({ ...DEFAULT_ASSUMPTIONS, bufferM: c.raw.bufferM ?? DEFAULT_ASSUMPTIONS.bufferM, usableFractionPct: c.raw.usableFractionPct ?? DEFAULT_ASSUMPTIONS.usableFractionPct });
-    setPv(null); setPvState({ status: 'idle' }); setProposalState({ status: 'idle' });
-    setTab('plan');
-  }
-
-  useEffect(() => { setPv(null); setPvState({ status: 'idle' }); }, [components, assumptions.usableFractionPct, assumptions.panelDensityKwdcPerM2, assumptions.pvTiltDeg, assumptions.pvAzimuthDeg, assumptions.pvLossesPct]);
-
-  const { evidence, evidenceError } = useMemo(() => {
-    if (!planCandidate) return { evidence: null, evidenceError: null };
-    try {
-      const scoreInfo = planCandidate.score !== undefined && ranked?.[planCandidate.mission]
-        ? { missionLabel: MISSIONS[planCandidate.mission].short, value: planCandidate.score, weights: ranked[planCandidate.mission].weights, formula: ranked[planCandidate.mission].formula }
-        : null;
-      const { evidence: ev } = buildSiteEvidence({ candidate: planCandidate, components, assumptions, pv, score: scoreInfo });
-      return { evidence: ev, evidenceError: null };
-    } catch (error) {
-      return { evidence: null, evidenceError: error instanceof RangeError ? `Check your inputs: ${error.message}.` : 'Could not build the evidence pack.' };
+    if (key === 'solar' || key === 'water' || key === 'green') {
+      setMission(key);
+      setTab('scan');
+      setPf((f) => ({ ...f, kind: 'all' }));
+      if (selectedCandidate && selectedCandidate.mission !== key) { setSelectedId(null); setPopupOpen(false); }
     }
-  }, [planCandidate, components, assumptions, pv, ranked]);
+  }
+
+  function setPriorityKind(kind) {
+    setPf((f) => ({ ...f, kind }));
+    setVisibility((v) => ({ ...v, priority: true, parking: kind !== 'building', buildings: kind !== 'parking' }));
+  }
+
+  // ---------- EcoPlan (multiple sites) ----------
+  const makePlan = (c) => ({
+    id: c.id, candidate: c, pv: null,
+    components: defaultComponents(c, c.mission || mission),
+    assumptions: { ...DEFAULT_ASSUMPTIONS, bufferM: c.raw.bufferM ?? DEFAULT_ASSUMPTIONS.bufferM, usableFractionPct: c.raw.usableFractionPct ?? DEFAULT_ASSUMPTIONS.usableFractionPct },
+  });
+
+  function addToPlan(candidate = selectedCandidate, { goToPlan = true } = {}) {
+    if (!candidate) return;
+    if (!plans.some((p) => p.id === candidate.id) && plans.length >= MAX_PORTFOLIO_SITES) {
+      setPlanMessage(`EcoPlan holds up to ${MAX_PORTFOLIO_SITES} sites. Remove one to add another.`);
+      setTab('plan');
+      return;
+    }
+    setPlanMessage('');
+    setPlans((prev) => (prev.some((p) => p.id === candidate.id) ? prev : [...prev, makePlan(candidate)]));
+    setActiveId(candidate.id);
+    setProposalState({ status: 'idle' });
+    if (goToPlan) setTab('plan');
+  }
+
+  function updatePlan(id, patch) {
+    setPlans((prev) => prev.map((p) => {
+      if (p.id !== id) return p;
+      const invalidatesPv = Boolean(patch.components) || Object.keys(patch.assumptions || {}).some((k) => PV_KEYS.includes(k));
+      return {
+        ...p,
+        components: patch.components ?? p.components,
+        assumptions: patch.assumptions ? { ...p.assumptions, ...patch.assumptions } : p.assumptions,
+        pv: invalidatesPv ? null : p.pv,
+      };
+    }));
+    if (patch.components || patch.assumptions) setPvState({ status: 'idle' });
+  }
+
+  function removePlan(id) {
+    setPlans((prev) => prev.filter((p) => p.id !== id));
+    setActiveId((cur) => (cur === id ? null : cur));
+    setPlanMessage('');
+  }
+
+  const activePlan = plans.find((p) => p.id === activeId) || plans[0] || null;
+  useEffect(() => { setPvState({ status: 'idle' }); }, [activeId]);
+
+  const evidenceByPlan = useMemo(() => {
+    const out = {};
+    for (const plan of plans) {
+      try {
+        const c = plan.candidate;
+        const fresh = ranked?.[c.mission]?.ranked.find((x) => x.id === c.id) || c;
+        const scoreInfo = fresh.score !== undefined && ranked?.[c.mission]
+          ? { missionLabel: MISSIONS[c.mission].short, value: fresh.score, weights: ranked[c.mission].weights, formula: ranked[c.mission].formula }
+          : null;
+        out[plan.id] = { ...buildSiteEvidence({ candidate: c, components: plan.components, assumptions: plan.assumptions, pv: plan.pv, score: scoreInfo }), error: null };
+      } catch (error) {
+        out[plan.id] = { evidence: null, error: error instanceof RangeError ? `Check your inputs: ${error.message}.` : 'Could not build the evidence pack.' };
+      }
+    }
+    return out;
+  }, [plans, ranked]);
+
+  const portfolio = useMemo(() => {
+    const ready = plans.map((p) => evidenceByPlan[p.id]).filter((e) => e?.evidence && e.evidence.metrics.some((m) => m.id.startsWith('scn.')));
+    if (!ready.length) return null;
+    try { return buildPortfolioEvidence(ready); } catch { return null; }
+  }, [plans, evidenceByPlan]);
 
   async function getPv() {
+    const plan = activePlan;
+    if (!plan) return;
     try {
       setPvState({ status: 'loading' });
+      const a = plan.assumptions;
       const { systemCapacityKwdc } = solarCapacity({
-        mappedAreaM2: planCandidate.raw.mappedAreaM2, usableFractionPct: assumptions.usableFractionPct, panelDensityKwdcPerM2: assumptions.panelDensityKwdcPerM2,
+        mappedAreaM2: plan.candidate.raw.mappedAreaM2, usableFractionPct: a.usableFractionPct, panelDensityKwdcPerM2: a.panelDensityKwdcPerM2,
       });
       const res = await requestSolarEstimate({
-        lat: planCandidate.lat, lon: planCandidate.lon, systemCapacityKwdc, moduleType: assumptions.pvModuleType, arrayType: assumptions.pvArrayType,
-        tiltDeg: assumptions.pvTiltDeg, azimuthDeg: assumptions.pvAzimuthDeg, lossesPct: assumptions.pvLossesPct,
+        lat: plan.candidate.lat, lon: plan.candidate.lon, systemCapacityKwdc, moduleType: a.pvModuleType, arrayType: a.pvArrayType,
+        tiltDeg: a.pvTiltDeg, azimuthDeg: a.pvAzimuthDeg, lossesPct: a.pvLossesPct,
       });
-      if (res.available) { setPv(res); setPvState({ status: 'ready' }); } else setPvState({ status: 'error', message: res.reason });
+      if (res.available) {
+        setPlans((prev) => prev.map((p) => (p.id === plan.id ? { ...p, pv: res } : p)));
+        setPvState({ status: 'ready' });
+      } else setPvState({ status: 'error', message: res.reason });
     } catch (error) {
       setPvState({ status: 'error', message: `${error.message} Capacity-only result retained.` });
     }
   }
 
-  async function generate() {
+  async function runProposal(evidence, scope) {
     if (!evidence) return;
-    setProposalState({ status: 'loading' });
+    setProposalState({ status: 'loading', scope });
     try {
       const res = await requestProposal(evidence);
       setReport({ ...res, evidence });
-      setProposalState({ status: 'idle' });
     } catch (error) {
       // API unreachable/rate-limited: the report must still render from deterministic metrics.
       setReport({
-        proposal: buildFallbackProposal(evidence), source: 'fallback', model: null, evidence,
+        proposal: evidence.intervention === 'portfolio' ? buildPortfolioFallback(evidence) : buildFallbackProposal(evidence),
+        source: 'fallback', model: null, evidence,
         warnings: [`Proposal API unavailable: ${error.message}`], generatedAt: new Date().toISOString(),
       });
-      setProposalState({ status: 'idle' });
+    }
+    setProposalState({ status: 'idle' });
+  }
+  const generate = () => runProposal(evidenceByPlan[activePlan?.id]?.evidence, 'site');
+  const generatePortfolio = () => runProposal(portfolio, 'portfolio');
+
+  // ---------- Ideas (Gemini brainstorm) ----------
+  const siteNames = useMemo(() => {
+    const out = {};
+    for (const m of ['solar', 'water', 'green']) for (const c of ranked?.[m]?.ranked || []) out[c.id] = c.name;
+    return out;
+  }, [ranked]);
+
+  function buildBrainstormContext() {
+    const sites = []; const metrics = [];
+    const push = (id, label, value, unit, sourceId, status) => { if (Number.isFinite(value)) metrics.push({ id, label: label.slice(0, 160), value: Math.round(value * 100) / 100, unit, sourceId, status }); };
+    for (const m of ['solar', 'water', ...(EXTRA_LAYERS ? ['green'] : [])]) {
+      for (const c of (ranked?.[m]?.ranked || []).slice(0, 5)) {
+        if (sites.length >= 15) break;
+        sites.push({ id: c.id, name: c.name, kind: c.kind, mission: m, rank: c.rank, score: Math.round(c.score * 10) / 10 });
+        const slot = `x${sites.length}`;
+        const src = c.kind === 'building' ? 'src-buildings' : c.kind === 'parking' ? 'src-parking' : 'src-paths';
+        if (c.kind === 'path') {
+          push(`${slot}.length_m`, `${c.name} — path length`, c.raw.pathLengthM, 'm', 'src-paths', 'measured');
+          push(`${slot}.canopy_pct`, `${c.name} — canopy coverage`, c.raw.canopyPct, '%', 'src-canopy', 'measured');
+        } else {
+          push(`${slot}.area_m2`, `${c.name} — mapped area (${m} mission)`, c.raw.mappedAreaM2, 'm²', src, 'measured');
+          push(`${slot}.path_m`, `${c.name} — distance to nearest path`, c.raw.pathDistanceM, 'm', 'src-paths', 'measured');
+        }
+        push(`${slot}.score`, `${c.name} — ${m} screening score`, c.score, 'pts', 'src-method', 'model');
+      }
+    }
+    push('c.solar_candidates', 'Solar candidates screened', scan.result?.solar.length, 'sites', 'src-method', 'model');
+    push('c.water_candidates', 'Water candidates screened', scan.result?.water.length, 'sites', 'src-method', 'model');
+    return {
+      focus: ideaFocus, sites, metrics: metrics.slice(0, 60),
+      layers: { buildings: Boolean(engine?.available.buildings), parking: Boolean(engine?.available.parking), canopyPolygons: Boolean(engine?.available.canopy), paths: Boolean(engine?.available.paths), greenspace: Boolean(engine?.available.greenspace) },
+    };
+  }
+
+  async function brainstorm() {
+    setIdeas((prev) => ({ ...prev, status: 'loading' }));
+    const ctx = buildBrainstormContext();
+    try {
+      const res = await requestBrainstorm(ctx);
+      setIdeas({ status: 'idle', result: res });
+    } catch (error) {
+      setIdeas({ status: 'idle', result: { ideas: buildFallbackIdeas(ctx), source: 'fallback', model: null, warnings: [`Brainstorm API unavailable: ${error.message}`] } });
     }
   }
 
@@ -257,8 +405,21 @@ export default function App() {
   const readyCount = CORE_KEYS.filter((k) => ['ready', 'cached'].includes(statuses[k]?.status)).length;
   const errorKeys = CORE_KEYS.filter((k) => statuses[k]?.status === 'error');
   const cachedKeys = CORE_KEYS.filter((k) => statuses[k]?.status === 'cached');
-  const showLegend = visibility.priority && missionRank;
-  const proposedGeometry = tab === 'plan' && planCandidate ? planCandidate.geometry : null;
+  const showLegend = visibility.priority && filteredMissionRank;
+  const proposedGeometry = tab === 'plan' && activePlan ? activePlan.candidate.geometry : null;
+
+  const popupSite = useMemo(() => {
+    const c = popupOpen ? selectedCandidate : null;
+    if (!c) return null;
+    const r = c.raw;
+    const lines = c.kind === 'path'
+      ? [`${fmtN(r.pathLengthM)} m long · ${fmtN(r.canopyPct, 1)}% canopy cover`]
+      : [`${fmtN(r.mappedAreaM2)} m² mapped${c.kind === 'building' ? ' (roof proxy)' : ''}`, ...(Number.isFinite(r.pathDistanceM) ? [`${fmtN(r.pathDistanceM)} m to nearest walkway`] : [])];
+    return {
+      id: c.id, name: c.name, kindLabel: KIND_LABEL[c.kind], score: c.score, rank: c.rank, lines, lon: c.lon, lat: c.lat,
+      inPlan: plans.some((p) => p.id === c.id),
+    };
+  }, [popupOpen, selectedCandidate, plans]);
 
   return (
     <main className="app-shell">
@@ -287,7 +448,7 @@ export default function App() {
 
           <div className="mission-switcher">
             {MISSION_BUTTONS.map((m) => (
-              <button key={m.key} className={`mission-button ${(m.key === mission && !visibility.heat) || (m.key === 'heat' && visibility.heat && !visibility.priority) ? 'active' : ''}`} onClick={() => switchMission(m.key)}>
+              <button key={m.key} className={`mission-button ${lens === m.key ? 'active' : ''}`} onClick={() => switchMission(m.key)}>
                 <span className={`mission-icon ${m.key === 'heat' ? 'heat-icon' : ''}`}>{m.icon}</span>
                 <span><strong>{m.label}</strong><small>{m.sub}</small></span>
               </button>
@@ -321,7 +482,7 @@ export default function App() {
             <div>
               <span className="eyebrow">CAMPUS ENVIRONMENTAL MAP</span>
               <h1>University of South Florida · Tampa</h1>
-              <p className="toolbar-subtitle">{MISSIONS[mission].label} · {scan.status === 'done' ? `${missionRank?.ranked.length ?? 0} ranked candidates` : 'run ANALYZE CAMPUS to rank sites'}</p>
+              <p className="toolbar-subtitle">{MISSIONS[mission].label} · {scan.status === 'done' ? `${filteredMissionRank?.ranked.length ?? 0} ranked candidates shown` : 'run ANALYZE CAMPUS to rank sites'}</p>
             </div>
             <div className="map-actions">
               <span className="data-count"><b>{readyCount}/{CORE_KEYS.length}</b> sources{cachedKeys.length ? ` · ${cachedKeys.length} cached` : ''}{errorKeys.length ? ` · ${errorKeys.length} errors` : ''}</span>
@@ -334,20 +495,39 @@ export default function App() {
             <MapView
               visibility={visibility} mapBase={mapBase} reloadToken={0}
               priority={priority} selectedGeometry={selectedCandidate?.geometry} proposedGeometry={proposedGeometry}
+              popupSite={popupSite} onPopupAdd={() => addToPlan(selectedCandidate, { goToPlan: false })} onPopupClose={() => setPopupOpen(false)}
               onStatus={updateStatus} onSelected={onMapSelect} onData={setData}
               onControlsReady={setControls} onMapReady={setMapReady}
             />
             <div className="map-overlay-tag"><span className="live-dot" /> USF TAMPA CAMPUS</div>
+
+            {scan.status === 'done' && mission !== 'green' && (
+              <div className="map-filter" role="group" aria-label="Priority filter">
+                <span className="map-filter-label">PRIORITY</span>
+                {[['all', 'All'], ['parking', 'Parking'], ['building', 'Buildings']].map(([k, label]) => (
+                  <button key={k} className={pf.kind === k ? 'selected' : ''} aria-pressed={pf.kind === k} onClick={() => setPriorityKind(k)}>{label}</button>
+                ))}
+                <label className="map-filter-top">
+                  <input type="checkbox" checked={pf.topOnly} onChange={(e) => setPf((f) => ({ ...f, topOnly: e.target.checked }))} /> High priority only
+                </label>
+                {pf.topOnly && (
+                  <select aria-label="Top share shown" value={pf.topPct} onChange={(e) => setPf((f) => ({ ...f, topPct: Number(e.target.value) }))}>
+                    <option value={10}>top 10%</option><option value={25}>top 25%</option><option value={50}>top 50%</option>
+                  </select>
+                )}
+              </div>
+            )}
+
             {statuses.campus?.status === 'loading' && <div className="map-loading" role="status">Loading USF campus layers…</div>}
             <div className="map-legend">
               {showLegend && (
                 <div className="heat-legend">
-                  <b>Priority · {MISSIONS[mission].short}</b>
+                  <b>Priority · {MISSIONS[mission].short}{pf.kind !== 'all' ? ` · ${pf.kind === 'parking' ? 'parking only' : 'buildings only'}` : ''}{pf.topOnly ? ` · top ${pf.topPct}%` : ''}</b>
                   <i className="heat-ramp" />
                   <span><em>lower</em><em>higher rank</em></span>
                 </div>
               )}
-              {visibility.canopy && <div><i className="legend-dot canopy" />Existing canopy</div>}
+              {visibility.canopy && <div><i className="legend-dot canopy" />Existing canopy (2021)</div>}
               {visibility.greenspace && <div><i className="legend-dot greenspace" />Green space</div>}
               {visibility.planting && <div><i className="legend-dot planting" />Potential planting</div>}
               {visibility.buildings && <div><i className="legend-dot buildings" />Buildings</div>}
@@ -359,36 +539,49 @@ export default function App() {
           </div>
           <div className="map-caption">
             <span>Basemap: Esri World Imagery · MapLibre GL JS</span>
-            <span>Overlays: USF Facilities / Community Maps + USF Water Institute 2021 · screening metrics, not surveyed</span>
+            <span>Overlays: USF Facilities + USF Water Institute 2021 · screening metrics, not surveyed</span>
           </div>
         </section>
 
         <aside className="right-panel panel">
           <div className="tab-bar" role="tablist">
-            {[['scan', 'EcoScan'], ['plan', 'EcoPlan'], ['data', 'Data']].map(([k, label]) => (
+            {[['scan', 'EcoScan'], ['plan', `EcoPlan${plans.length ? ` (${plans.length})` : ''}`], ['ideas', 'Ideas ✨'], ['data', 'Data']].map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{label}</button>
             ))}
           </div>
 
           {tab === 'scan' && (
             <ScanPanel
-              mission={mission} scan={scan} ranked={ranked} weights={weights}
+              mission={mission} scan={scan} ranked={viewRanked} weights={weights}
               onWeights={(m, w) => setWeights((prev) => ({ ...prev, [m]: w }))}
               onResetWeights={() => setWeights((prev) => ({ ...prev, [mission]: { ...DEFAULT_WEIGHTS[mission] } }))}
               onAnalyze={analyze} canAnalyze={blockers.length === 0} blockers={blockers}
-              selectedId={selectedId} onSelect={(id) => { setSelectedId(id); const c = missionRank?.ranked.find((x) => x.id === id); if (c) controls?.flyToGeometry(c.geometry); }}
-              selectedCandidate={selectedCandidate} onAddToPlan={addToPlan} onFly={() => controls?.flyToGeometry(selectedCandidate?.geometry)}
+              selectedId={selectedId} onSelect={(id) => selectSite(id, { fly: true })}
+              selectedCandidate={selectedCandidate} onAddToPlan={() => addToPlan(selectedCandidate)}
+              inPlan={plans.some((p) => p.id === selectedCandidate?.id)}
+              onFly={() => controls?.flyToGeometry(selectedCandidate?.geometry)}
               settings={settings} onSettings={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
             />
           )}
 
           {tab === 'plan' && (
-            <PlannerPanel
-              candidate={planCandidate} components={components} onComponents={setComponents}
-              assumptions={assumptions} onAssumptions={(patch) => setAssumptions((prev) => ({ ...prev, ...patch }))}
-              evidence={evidence} evidenceError={evidenceError} pv={pv} pvState={pvState} onPv={getPv}
-              health={health} proposalState={proposalState} onGenerate={generate}
-              onClear={() => { setPlanCandidate(null); setPv(null); }}
+            <>
+              {planMessage && <p className="warn-text">{planMessage}</p>}
+              <PlannerPanel
+                plans={plans} activeId={activePlan?.id} onActivate={setActiveId} onRemove={removePlan}
+                onClearAll={() => { setPlans([]); setActiveId(null); setPlanMessage(''); }}
+                onUpdate={updatePlan} evidenceByPlan={evidenceByPlan} portfolio={portfolio} onGeneratePortfolio={generatePortfolio}
+                pvState={pvState} onPv={getPv} health={health} proposalState={proposalState} onGenerate={generate}
+              />
+            </>
+          )}
+
+          {tab === 'ideas' && (
+            <IdeasPanel
+              focus={ideaFocus} onFocus={setIdeaFocus} state={ideas} onBrainstorm={brainstorm}
+              hasScan={scan.status === 'done'} siteNames={siteNames} health={health}
+              onOpenSite={(id) => { if (id.startsWith('path') && mission !== 'green') setMission('green'); else if (!id.startsWith('path') && mission === 'green') setMission('solar'); selectSite(id, { fly: true }); setTab('scan'); }}
+              onAddSite={(id) => { const c = resolveCandidate(id); if (c) addToPlan(c); }}
             />
           )}
 
@@ -410,6 +603,7 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {!EXTRA_LAYERS && <p className="limit-text">Optional layers (canopy polygons, walkways, green space) are switched off because their servers were unreachable. Scoring uses buildings and parking; canopy, planting and heat remain available as 2021 map overlays.</p>}
               </div>
               <div className="inspector-section">
                 <div className="section-title">SELECTED FEATURE</div>
@@ -425,7 +619,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="empty-state"><div className="empty-icon">⌖</div><strong>Nothing selected</strong><span>Click a walkway, building, parking lot or canopy polygon on the map.</span></div>
+                  <div className="empty-state"><div className="empty-icon">⌖</div><strong>Nothing selected</strong><span>Click a building or parking lot on the map.</span></div>
                 )}
               </div>
               <div className="panel-footnote right-note">

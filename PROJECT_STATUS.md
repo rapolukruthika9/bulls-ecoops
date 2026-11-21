@@ -14,3 +14,11 @@
 
 ## Next
 Cached demo proposal, Judge Mode, bottom ranked bar, before/after overlay, fixture-savings calculator.
+
+## v3 changes
+- Failing optional layers (canopy polygons, walkways, green space) are off by default; set `VITE_ENABLE_EXTRA_LAYERS=true` to re-enable.
+- Report opens with a headline + stat cards + takeaways (numbers come from computed metrics).
+- Priority filter: All / Parking / Buildings + "High priority only" (top 10/25/50%).
+- EcoPlan holds up to 6 sites with combined portfolio totals and a combined report.
+- Map pop-up with *Add to EcoPlan* on the selected site.
+- Ideas tab: Gemini brainstorm (verified; general ideas must contain no numbers) with rule-based fallback.

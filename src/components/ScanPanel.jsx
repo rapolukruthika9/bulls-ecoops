@@ -3,8 +3,8 @@ import { SOURCES } from '../../shared/sources.js';
 
 export const MISSIONS = {
   green: { label: 'Green corridor', short: 'Green', blurb: 'Walkways with the lowest mapped canopy overlap', unit: 'low-canopy exposure' },
-  solar: { label: 'Solar shade canopy', short: 'Parking & solar', blurb: 'Parking lots and roofs by mapped area and walkway adjacency', unit: 'solar screening' },
-  water: { label: 'Water-smart site', short: 'Water', blurb: 'Roof and paved catchments near green space', unit: 'water screening' },
+  solar: { label: 'Solar shade canopy', short: 'Parking & solar', blurb: 'Parking lots and roofs ranked by mapped area (walkway adjacency when that layer is available)', unit: 'solar screening' },
+  water: { label: 'Water-smart site', short: 'Water', blurb: 'Roof and paved catchments ranked by catchment / paved area (green-space adjacency when available)', unit: 'water screening' },
 };
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? Number(v).toLocaleString('en-US', { maximumFractionDigits: d }) : '—');
@@ -19,7 +19,7 @@ function SourceBadge({ id }) {
   return <span className="source-badge" title={s?.title}>{id.replace('src-', '')}</span>;
 }
 
-export function SiteDetail({ candidate, formula, onAddToPlan, onFly }) {
+export function SiteDetail({ candidate, formula, onAddToPlan, onFly, inPlan }) {
   if (!candidate) return null;
   const r = candidate.raw;
   const rows = candidate.kind === 'path'
@@ -57,7 +57,7 @@ export function SiteDetail({ candidate, formula, onAddToPlan, onFly }) {
       {candidate.missing?.length > 0 && <p className="warn-text">Missing data: {candidate.missing.join(', ')}. Related terms are not scored.</p>}
       <p className="limit-text">Screening candidate — engineering review required. Geodesic WGS84 metrics, not surveyed.</p>
       <div className="button-row">
-        <button className="primary-button" onClick={onAddToPlan}>Add to EcoPlan →</button>
+        <button className="primary-button" onClick={onAddToPlan} disabled={inPlan}>{inPlan ? '✓ In EcoPlan' : 'Add to EcoPlan →'}</button>
         <button className="secondary-button" onClick={onFly}>Zoom to site</button>
       </div>
     </div>
@@ -66,7 +66,7 @@ export function SiteDetail({ candidate, formula, onAddToPlan, onFly }) {
 
 export default function ScanPanel({
   mission, scan, ranked, weights, onWeights, onResetWeights, onAnalyze, canAnalyze, blockers,
-  selectedId, onSelect, selectedCandidate, onAddToPlan, onFly, settings, onSettings,
+  selectedId, onSelect, selectedCandidate, onAddToPlan, onFly, settings, onSettings, inPlan,
 }) {
   const terms = MISSION_TERMS[mission];
   const mr = ranked?.[mission];
@@ -149,7 +149,7 @@ export default function ScanPanel({
         </>
       )}
 
-      {selectedCandidate && <SiteDetail candidate={selectedCandidate} formula={mr?.formula} onAddToPlan={onAddToPlan} onFly={onFly} />}
+      {selectedCandidate && <SiteDetail candidate={selectedCandidate} formula={mr?.formula} onAddToPlan={onAddToPlan} onFly={onFly} inPlan={inPlan} />}
     </div>
   );
 }
