@@ -4,7 +4,7 @@ import { SOURCES } from '../../shared/sources.js';
 export const MISSIONS = {
   plant: { label: 'Green planting', short: 'Green planting', blurb: 'Unbuilt open space, excluding buildings, parking lots and stadiums', unit: 'open-space screening' },
   green: { label: 'Green corridor', short: 'Green', blurb: 'Walkways with the lowest mapped canopy overlap', unit: 'low-canopy exposure' },
-  solar: { label: 'Solar shade canopy', short: 'Parking & solar', blurb: 'Parking lots and roofs ranked by mapped area (walkway adjacency when that layer is available)', unit: 'solar screening' },
+  solar: { label: 'Solar shade canopy', short: 'Parking & solar', blurb: 'Parking lots and roofs ranked by mapped area and nearness to buildings (walkway adjacency too, when that layer is loaded)', unit: 'solar screening' },
   water: { label: 'Water-smart site', short: 'Water', blurb: 'Roof and paved catchments ranked by catchment / paved area (green-space adjacency when available)', unit: 'water screening' },
 };
 
@@ -80,6 +80,9 @@ export default function ScanPanel({
   const terms = MISSION_TERMS[mission];
   const mr = ranked?.[mission];
   const list = mr?.ranked || [];
+  const activeCount = Object.keys(mr?.weights || {}).length;
+  const unusedTerms = terms.filter((t) => mr?.droppedTerms?.includes(t.key));
+  const weightsChanged = Object.keys(DEFAULT_WEIGHTS[mission]).some((k) => Math.abs((weights[mission][k] ?? 0) - DEFAULT_WEIGHTS[mission][k]) > 1e-9);
   return (
     <div className="scan-panel">
       <div className="mission-header">
@@ -137,20 +140,29 @@ export default function ScanPanel({
       {scan.status === 'done' && (
         <>
           <div className="weights">
-            <div className="section-title">SCORING WEIGHTS (adjustable · product choice, not scientific)</div>
+            <div className="section-title">SCORING WEIGHTS</div>
+            <p className="limit-text">
+              The 0–100 score adds up a few factors. A weight says how much each factor counts; drag a slider and the ranking, list and map colours update instantly. Weights always total 100%. They are adjustable product choices, not scientific values.
+            </p>
+            {activeCount < 2 && (
+              <p className="warn-text">
+                Only one factor has data right now{unusedTerms.length ? ` (no data for: ${unusedTerms.map((t) => t.label.replace('Normalized ', '')).join(', ')})` : ''}, so the weights cannot change the ranking and the sliders are locked.
+                Another factor appears when its layer loads (or turn on Demo data).
+              </p>
+            )}
             {terms.map((t) => {
               const active = mr?.weights?.[t.key];
               const dropped = mr?.droppedTerms?.includes(t.key);
               return (
                 <label className="weight-row" key={t.key}>
-                  <span>{t.label}{dropped ? ' (no data)' : ''}</span>
-                  <input type="range" min="0" max="1" step="0.05" value={weights[mission][t.key]} disabled={dropped}
+                  <span>{t.label}{dropped ? ' — no data' : ''}</span>
+                  <input type="range" min="0" max="1" step="0.05" value={weights[mission][t.key]} disabled={dropped || activeCount < 2}
                     onChange={(e) => onWeights(mission, { ...weights[mission], [t.key]: Number(e.target.value) })} />
                   <b>{Number.isFinite(active) ? `${Math.round(active * 100)}%` : '—'}</b>
                 </label>
               );
             })}
-            <button className="link-button" onClick={onResetWeights}>Reset to {Object.values(DEFAULT_WEIGHTS[mission]).map((v) => Math.round(v * 100)).join(' / ')}</button>
+            {weightsChanged && <button className="link-button" onClick={onResetWeights}>Reset weights to defaults</button>}
             <code className="formula-line">{mr?.formula}</code>
           </div>
 

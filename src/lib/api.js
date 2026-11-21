@@ -17,4 +17,14 @@ const post = (path, body) => json(path, {
 export const getHealth = () => json('/api/health');
 export const requestSolarEstimate = (body) => post('/api/solar-estimate', body);
 export const requestProposal = (evidence) => post('/api/proposal', { evidence });
+/** Server-rendered PDF (US Letter or A4). Returns a Blob. */
+export async function requestReportPdf(body) {
+  const res = await fetch('/api/report-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    let message = `PDF request failed (${res.status}).`;
+    try { message = (await res.json()).error || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  return res.blob();
+}
 export const requestBrainstorm = (context) => post('/api/brainstorm', { context });

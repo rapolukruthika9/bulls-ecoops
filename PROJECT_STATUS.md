@@ -30,3 +30,9 @@ Cached demo proposal, Judge Mode, bottom ranked bar, before/after overlay, fixtu
 - Priority filter bar can be closed/reopened; hidden outside the priority views.
 - Ranked candidates show a confidence dot (green/amber/red) instead of the word.
 - Report/PDF is US Letter (`@page size: letter`, ½-inch margins); PDF file name is set from the site ID.
+
+## v5 changes
+- Server-built PDF (`POST /api/report-pdf`, pdfkit): Letter or A4, vector text, headline banner, tables, footer page numbers. Replaces reliance on browser print scaling.
+- Scoring weights: Solar now has a second real factor that works without walkway data (distance to nearest building, a load-proximity proxy). When only one factor has data the sliders lock and say why; "Reset" only appears after a change.
+- Demo data mode (synthetic, clearly labelled, carried through evidence/report/PDF/Ideas).
+- Not verified: live USF data, real Gemini output, real PVWatts (no network/keys in the build sandbox).

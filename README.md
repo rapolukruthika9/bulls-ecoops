@@ -18,6 +18,16 @@ npm run build && npm start  # production: Express serves dist + API + GIS proxy 
 npm run snapshot            # (needs network) cache public GeoJSON into public/data as a labelled fallback
 ```
 
+## Demo data (when live USF layers are unreachable)
+Click **Demo data: ON** in the top bar (or open `/?demo=1`). It loads a **synthetic** campus: 275 buildings and 106 parking lots
+(the counts the live layers returned), a ~7 km² boundary, generic names ("Demo lot 12"), plausible log-normal sizes.
+Positions, shapes and sizes are assumptions, **not USF measurements**. Everything derived from it is stamped DEMO DATA
+(map tag, report, PDF) and cites `src-demo`, never a real USF source. Code: `src/lib/demoData.js`.
+
+## PDF reports
+**Download PDF** builds a real PDF on the server (`/api/report-pdf`): US Letter or A4, chosen in the report toolbar. The proposal is
+re-verified against the evidence before rendering. `Print…` (browser print) is still available but depends on the browser's own scaling.
+
 ## What it does
 - **Layer toggles** — Green (canopy, planting, green space), Water, Parking & solar, Heat (2021 LST study), each individually toggleable.
 - **EcoScan** (`src/lib/gis.js`) — *ANALYZE CAMPUS* buffers every walkway, intersects with dissolved canopy, and screens parking/roof polygons for area, walkway adjacency and green-space adjacency. Results render as a **priority heat-map + scored outlines** and a ranked list.
