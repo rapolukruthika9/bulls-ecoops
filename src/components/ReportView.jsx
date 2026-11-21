@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { ALLOWED_URLS, SOURCES, SCENARIO_LABEL, SCREENING_DISCLAIMER } from '../../shared/sources.js';
 
 const fmt = (v, d = 2) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d });
@@ -8,7 +9,7 @@ const STAT_PRIORITY = [
   ['tot.capacity_kwdc', 'solar capacity'], ['tot.pv_kwh', 'modelled kWh / year'], ['tot.capture_m3', 'rainwater per event'], ['tot.trees', 'trees proposed'],
   ['scn.pv_ac_annual_kwh', 'modelled kWh / year'], ['scn.capacity_kwdc', 'solar capacity'], ['scn.capture_m3', 'rainwater per event'],
   ['scn.diverted_volume_m3', 'to rain garden'], ['scn.proposed_tree_count', 'trees proposed'],
-  ['tot.area_m2', 'surface screened'], ['base.mapped_area_m2', 'mapped surface'], ['base.low_canopy_pct', 'low-canopy exposure'],
+  ['scn.planting_area_m2', 'planted area'], ['tot.area_m2', 'surface screened'], ['base.mapped_area_m2', 'mapped surface'], ['base.low_canopy_pct', 'low-canopy exposure'],
 ];
 
 function pickStats(evidence) {
@@ -37,12 +38,24 @@ export default function ReportView({ report, evidence, onClose }) {
   const takeaways = (p.key_takeaways && p.key_takeaways.length ? p.key_takeaways : p.baseline_claims.map((c) => c.text)).slice(0, 4);
   const headline = p.headline || p.executive_summary;
   const isPortfolio = evidence.intervention === 'portfolio';
+  const fileTitle = `BULLS-ECOOPS-${isPortfolio ? 'portfolio' : evidence.siteId}-report`;
+
+  // Chrome/Edge use the page title as the default PDF file name; restore it afterwards.
+  useEffect(() => {
+    const original = document.title;
+    const before = () => { document.title = fileTitle; };
+    const after = () => { document.title = original; };
+    window.addEventListener('beforeprint', before);
+    window.addEventListener('afterprint', after);
+    return () => { window.removeEventListener('beforeprint', before); window.removeEventListener('afterprint', after); document.title = original; };
+  }, [fileTitle]);
 
   return (
     <div className="report-overlay" role="dialog" aria-modal="true" aria-label="Proposal report">
       <div className="report-toolbar no-print">
         <button className="secondary-button" onClick={onClose}>← Back to map</button>
-        <button className="primary-button" onClick={() => window.print()}>Print / Save as PDF</button>
+        <span className="toolbar-hint">Letter size (8.5 × 11 in) · choose “Save as PDF” as the destination</span>
+        <button className="primary-button" onClick={() => window.print()}>Download PDF (Letter)</button>
       </div>
       <article className="report">
         <header>

@@ -1,10 +1,10 @@
 const CATEGORY = {
-  energy: { label: 'Energy', icon: '⚡' },
-  water: { label: 'Water', icon: '💧' },
-  'green-heat': { label: 'Green & heat', icon: '🌳' },
-  'behavior-and-monitoring': { label: 'Monitoring & engagement', icon: '📊' },
-  'policy-and-funding': { label: 'Funding & policy', icon: '🏛' },
-  'cross-cutting': { label: 'Multi-benefit', icon: '✨' },
+  energy: { label: 'Energy', icon: '' },
+  water: { label: 'Water', icon: '' },
+  'green-heat': { label: 'Green & heat', icon: '' },
+  'behavior-and-monitoring': { label: 'Monitoring & engagement', icon: '' },
+  'policy-and-funding': { label: 'Funding & policy', icon: '' },
+  'cross-cutting': { label: 'Multi-benefit', icon: '' },
 };
 const SUGGESTIONS = ['Make USF a net-zero energy campus', 'Cooler walkways for students', 'Water-smart parking lots', 'Student-funded green projects'];
 
@@ -30,7 +30,7 @@ export default function IdeasPanel({
       </div>
 
       <button className="primary-button" disabled={state.status === 'loading'} onClick={onBrainstorm}>
-        {state.status === 'loading' ? 'Brainstorming…' : result ? '↻ Brainstorm again' : health?.gemini ? '✨ Brainstorm with Gemini' : '✨ Generate ideas'}
+        {state.status === 'loading' ? 'Brainstorming…' : result ? '↻ Brainstorm again' : health?.gemini ? 'Brainstorm with Gemini' : 'Generate ideas'}
       </button>
       {!health?.gemini && <span className="limit-text">Gemini key not configured — showing rule-based ideas from your top-ranked sites.</span>}
       {state.status === 'error' && <p className="error-text">{state.message}</p>}
@@ -49,7 +49,7 @@ export default function IdeasPanel({
               return (
                 <li className="idea-card" key={i}>
                   <div className="idea-head">
-                    <span className="idea-cat">{cat.icon} {cat.label}</span>
+                    <span className="idea-cat">{cat.label}</span>
                     <span className={`idea-tag ${idea.data_backed ? 'backed' : 'general'}`}>{idea.data_backed ? 'DATA-BACKED' : 'GENERAL IDEA'}</span>
                   </div>
                   <strong>{idea.title}</strong>

@@ -5,6 +5,7 @@ import PlannerPanel from './components/PlannerPanel.jsx';
 import IdeasPanel from './components/IdeasPanel.jsx';
 import ReportView from './components/ReportView.jsx';
 import { createEngine, rankAll, SITE_PREFIX, DEFAULTS } from './lib/gis.js';
+import { loadLayerLegend } from './lib/data.js';
 import { getHealth, requestBrainstorm, requestProposal, requestSolarEstimate } from './lib/api.js';
 import { EXTRA_LAYERS, VECTOR_KEYS } from './lib/config.js';
 import { DEFAULT_WEIGHTS } from '../shared/scoring.js';
@@ -34,17 +35,23 @@ const PRESETS = {
   greenlens: { ...ALL_OFF, campus: true, canopy: true, planting: true },
   water: { ...ALL_OFF, campus: true, buildings: true, parking: true, greenspace: true, priority: true },
   solar: { ...ALL_OFF, campus: true, buildings: true, parking: true, paths: true, priority: true },
+  plant: { ...ALL_OFF, campus: true, buildings: true, parking: true, canopy: true, priority: true },
   heat: { ...ALL_OFF, campus: true, heat: true },
 };
 const CORE_KEYS = ['campus', ...VECTOR_KEYS];
 const VECTOR_LABEL = Object.fromEntries(ALL_LAYERS.map((l) => [l.key, l.label]));
 
+// Missions rank candidate sites (they need ANALYZE). Green planting appears only once the scan
+// has actually found unbuilt open space.
 const MISSION_BUTTONS = [
-  EXTRA_LAYERS
-    ? { key: 'green', icon: '♧', label: 'Green', sub: 'Canopy gaps on walkways' }
-    : { key: 'greenlens', icon: '♧', label: 'Green zones', sub: '2021 canopy & planting study' },
+  { key: 'solar', icon: '▦', label: 'Solar', sub: 'Parking lots and roofs' },
   { key: 'water', icon: '◍', label: 'Water', sub: 'Roof & paved catchments' },
-  { key: 'solar', icon: '▦', label: 'Parking & solar', sub: 'Lots and roofs' },
+  ...(EXTRA_LAYERS ? [{ key: 'green', icon: '♧', label: 'Green corridors', sub: 'Canopy gaps on walkways' }] : []),
+];
+const PLANT_BUTTON = { key: 'plant', icon: '♧', label: 'Green planting', sub: 'Unbuilt open space (no parking, stadiums)' };
+// Data views are reference overlays, not rankings.
+const DATA_BUTTONS = [
+  { key: 'greenlens', icon: '♧', label: 'Green zones', sub: '2021 canopy & planting study' },
   { key: 'heat', icon: '☼', label: 'Heat areas', sub: '2021 surface-temp study' },
 ];
 
@@ -69,13 +76,13 @@ function LayerRow({ layer, visible, status, onToggle }) {
 const kindToLayer = { path: 'paths', parking: 'parking', building: 'buildings' };
 
 function defaultComponents(candidate, mission) {
-  if (candidate.kind === 'path') return ['planting'];
+  if (candidate.kind === 'path' || candidate.kind === 'openspace') return ['planting'];
   if (candidate.kind === 'parking') return mission === 'water' ? ['rainwater', 'raingarden'] : ['solar', 'rainwater', 'raingarden'];
   return mission === 'water' ? ['rainwater'] : ['solar'];
 }
 
 const PV_KEYS = ['usableFractionPct', 'panelDensityKwdcPerM2', 'pvTiltDeg', 'pvAzimuthDeg', 'pvLossesPct'];
-const KIND_LABEL = { path: 'WALKWAY', parking: 'PARKING LOT', building: 'BUILDING' };
+const KIND_LABEL = { path: 'WALKWAY', parking: 'PARKING LOT', building: 'BUILDING', openspace: 'OPEN SPACE' };
 const fmtN = (v, d = 0) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d });
 
 export default function App() {
@@ -95,7 +102,12 @@ export default function App() {
   const [inspected, setInspected] = useState(null);
   const [health, setHealth] = useState(null);
 
-  const [settings, setSettings] = useState({ bufferM: DEFAULTS.bufferM, usableFractionPct: DEFAULTS.usableFractionPct });
+  const [settings, setSettings] = useState({
+    bufferM: DEFAULTS.bufferM, usableFractionPct: DEFAULTS.usableFractionPct,
+    buildingBufferM: DEFAULTS.buildingBufferM, parkingBufferM: DEFAULTS.parkingBufferM, athleticBufferM: DEFAULTS.athleticBufferM, minOpenAreaM2: DEFAULTS.minOpenAreaM2,
+  });
+  const [filterOpen, setFilterOpen] = useState(true);
+  const [heatLegend, setHeatLegend] = useState({ status: 'idle', data: null });
   const [scan, setScan] = useState({ status: 'idle', progress: null, result: null, error: null });
   const [weights, setWeights] = useState(() => JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)));
   const [selectedId, setSelectedId] = useState(null);
@@ -115,6 +127,17 @@ export default function App() {
 
   useEffect(() => { getHealth().then(setHealth).catch(() => setHealth(null)); }, []);
 
+  // Heat scale: ask the map service what its colours mean (once, when the heat layer is first shown).
+  useEffect(() => {
+    if (!visibility.heat || heatLegend.status !== 'idle') return undefined;
+    const controller = new AbortController();
+    setHeatLegend({ status: 'loading', data: null });
+    loadLayerLegend('/gis/lst', 15, controller.signal)
+      .then((data) => setHeatLegend({ status: data ? 'ready' : 'fallback', data }))
+      .catch(() => setHeatLegend({ status: 'fallback', data: null }));
+    return () => controller.abort();
+  }, [visibility.heat]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function updateStatus(key, status, message) {
     setStatuses((prev) => ({ ...prev, [key]: { status, message } }));
   }
@@ -123,6 +146,7 @@ export default function App() {
   const engine = useMemo(() => {
     if (!data) return null;
     return createEngine({
+      campus: data.campus,
       paths: data.paths?.collection, canopy: data.canopy?.collection, parking: data.parking?.collection,
       buildings: data.buildings?.collection, greenspace: data.greenspace?.collection,
     }, { paths: EXTRA_LAYERS, greenspace: EXTRA_LAYERS });
@@ -170,7 +194,7 @@ export default function App() {
   const filteredMissionRank = useMemo(() => {
     if (!missionRank) return null;
     let list = missionRank.ranked;
-    if (mission !== 'green') {
+    if (mission === 'solar' || mission === 'water') {
       if (pf.kind !== 'all') list = list.filter((c) => c.kind === pf.kind);
       if (pf.topOnly && list.length) list = list.slice(0, Math.max(1, Math.ceil((list.length * pf.topPct) / 100)));
     }
@@ -193,7 +217,7 @@ export default function App() {
   // ---------- selection ----------
   function resolveCandidate(id, preferMission = mission) {
     if (!id) return null;
-    for (const m of ['solar', 'water', 'green']) {
+    for (const m of ['solar', 'water', 'plant', 'green']) {
       const hit = ranked?.[m]?.ranked.find((c) => c.id === id);
       if (hit && (m === preferMission || !ranked?.[preferMission]?.ranked.some((c) => c.id === id))) return hit;
     }
@@ -225,7 +249,8 @@ export default function App() {
     if (info && SITE_PREFIX[info.layerKey]) {
       const kind = SITE_PREFIX[info.layerKey];
       if (kind === 'path' && mission !== 'green') setMission('green');
-      if (kind !== 'path' && mission === 'green') setMission('solar');
+      else if (kind === 'openspace' && mission !== 'plant') setMission('plant');
+      else if ((kind === 'parking' || kind === 'building') && (mission === 'green' || mission === 'plant')) setMission('solar');
       setSelectedId(`${kind}-${info.objectId}`);
       setPopupOpen(true);
       setTab('scan');
@@ -235,7 +260,7 @@ export default function App() {
   function switchMission(key) {
     setLens(key);
     setVisibility(PRESETS[key]);
-    if (key === 'solar' || key === 'water' || key === 'green') {
+    if (key === 'solar' || key === 'water' || key === 'plant' || key === 'green') {
       setMission(key);
       setTab('scan');
       setPf((f) => ({ ...f, kind: 'all' }));
@@ -359,22 +384,25 @@ export default function App() {
   // ---------- Ideas (Gemini brainstorm) ----------
   const siteNames = useMemo(() => {
     const out = {};
-    for (const m of ['solar', 'water', 'green']) for (const c of ranked?.[m]?.ranked || []) out[c.id] = c.name;
+    for (const m of ['solar', 'water', 'plant', 'green']) for (const c of ranked?.[m]?.ranked || []) out[c.id] = c.name;
     return out;
   }, [ranked]);
 
   function buildBrainstormContext() {
     const sites = []; const metrics = [];
     const push = (id, label, value, unit, sourceId, status) => { if (Number.isFinite(value)) metrics.push({ id, label: label.slice(0, 160), value: Math.round(value * 100) / 100, unit, sourceId, status }); };
-    for (const m of ['solar', 'water', ...(EXTRA_LAYERS ? ['green'] : [])]) {
+    for (const m of ['solar', 'water', 'plant', ...(EXTRA_LAYERS ? ['green'] : [])]) {
       for (const c of (ranked?.[m]?.ranked || []).slice(0, 5)) {
         if (sites.length >= 15) break;
         sites.push({ id: c.id, name: c.name, kind: c.kind, mission: m, rank: c.rank, score: Math.round(c.score * 10) / 10 });
         const slot = `x${sites.length}`;
-        const src = c.kind === 'building' ? 'src-buildings' : c.kind === 'parking' ? 'src-parking' : 'src-paths';
+        const src = c.kind === 'building' ? 'src-buildings' : c.kind === 'parking' ? 'src-parking' : c.kind === 'openspace' ? 'src-openspace' : 'src-paths';
         if (c.kind === 'path') {
           push(`${slot}.length_m`, `${c.name} — path length`, c.raw.pathLengthM, 'm', 'src-paths', 'measured');
           push(`${slot}.canopy_pct`, `${c.name} — canopy coverage`, c.raw.canopyPct, '%', 'src-canopy', 'measured');
+        } else if (c.kind === 'openspace') {
+          push(`${slot}.area_m2`, `${c.name} — unbuilt open area`, c.raw.mappedAreaM2, 'm²', src, 'measured');
+          push(`${slot}.compact`, `${c.name} — compactness index`, c.raw.compactness, '', src, 'measured');
         } else {
           push(`${slot}.area_m2`, `${c.name} — mapped area (${m} mission)`, c.raw.mappedAreaM2, 'm²', src, 'measured');
           push(`${slot}.path_m`, `${c.name} — distance to nearest path`, c.raw.pathDistanceM, 'm', 'src-paths', 'measured');
@@ -383,6 +411,7 @@ export default function App() {
       }
     }
     push('c.solar_candidates', 'Solar candidates screened', scan.result?.solar.length, 'sites', 'src-method', 'model');
+    push('c.plant_candidates', 'Open spaces found', scan.result?.plant.length, 'sites', 'src-method', 'model');
     push('c.water_candidates', 'Water candidates screened', scan.result?.water.length, 'sites', 'src-method', 'model');
     return {
       focus: ideaFocus, sites, metrics: metrics.slice(0, 60),
@@ -412,7 +441,9 @@ export default function App() {
     const c = popupOpen ? selectedCandidate : null;
     if (!c) return null;
     const r = c.raw;
-    const lines = c.kind === 'path'
+    const lines = c.kind === 'openspace'
+      ? [`${fmtN(r.mappedAreaM2)} m² unbuilt open space`, 'Excludes buildings, parking, stadiums']
+      : c.kind === 'path'
       ? [`${fmtN(r.pathLengthM)} m long · ${fmtN(r.canopyPct, 1)}% canopy cover`]
       : [`${fmtN(r.mappedAreaM2)} m² mapped${c.kind === 'building' ? ' (roof proxy)' : ''}`, ...(Number.isFinite(r.pathDistanceM) ? [`${fmtN(r.pathDistanceM)} m to nearest walkway`] : [])];
     return {
@@ -441,13 +472,27 @@ export default function App() {
       <section className="workspace">
         <aside className="left-panel panel">
           <div className="panel-heading">
-            <span className="eyebrow">MISSIONS</span>
+            <span className="eyebrow">EXPLORE</span>
             <h2>What to look at</h2>
             <p>Pick a lens. Each shows its own layers; Analyze then ranks candidate sites.</p>
           </div>
 
+          <div className="nav-subhead">MISSIONS</div>
           <div className="mission-switcher">
-            {MISSION_BUTTONS.map((m) => (
+            {[...MISSION_BUTTONS, ...(scan.status === 'done' && scan.result?.plant.length > 0 ? [PLANT_BUTTON] : [])].map((m) => (
+              <button key={m.key} className={`mission-button ${lens === m.key ? 'active' : ''}`} onClick={() => switchMission(m.key)}>
+                <span className="mission-icon">{m.icon}</span>
+                <span><strong>{m.label}</strong><small>{m.sub}</small></span>
+              </button>
+            ))}
+            {!(scan.status === 'done' && scan.result?.plant.length > 0) && (
+              <p className="limit-text">Green planting appears after ANALYZE CAMPUS finds unbuilt open space (outside buildings, parking and stadiums).</p>
+            )}
+          </div>
+
+          <div className="nav-subhead">DATA</div>
+          <div className="mission-switcher">
+            {DATA_BUTTONS.map((m) => (
               <button key={m.key} className={`mission-button ${lens === m.key ? 'active' : ''}`} onClick={() => switchMission(m.key)}>
                 <span className={`mission-icon ${m.key === 'heat' ? 'heat-icon' : ''}`}>{m.icon}</span>
                 <span><strong>{m.label}</strong><small>{m.sub}</small></span>
@@ -501,7 +546,7 @@ export default function App() {
             />
             <div className="map-overlay-tag"><span className="live-dot" /> USF TAMPA CAMPUS</div>
 
-            {scan.status === 'done' && mission !== 'green' && (
+            {scan.status === 'done' && visibility.priority && (mission === 'solar' || mission === 'water') && (filterOpen ? (
               <div className="map-filter" role="group" aria-label="Priority filter">
                 <span className="map-filter-label">PRIORITY</span>
                 {[['all', 'All'], ['parking', 'Parking'], ['building', 'Buildings']].map(([k, label]) => (
@@ -515,8 +560,11 @@ export default function App() {
                     <option value={10}>top 10%</option><option value={25}>top 25%</option><option value={50}>top 50%</option>
                   </select>
                 )}
+                <button className="map-filter-close" onClick={() => setFilterOpen(false)} aria-label="Close priority filter" title="Close">×</button>
               </div>
-            )}
+            ) : (
+              <button className="map-filter-reopen" onClick={() => setFilterOpen(true)}>Priority filter ▾</button>
+            ))}
 
             {statuses.campus?.status === 'loading' && <div className="map-loading" role="status">Loading USF campus layers…</div>}
             <div className="map-legend">
@@ -536,6 +584,27 @@ export default function App() {
               {visibility.heat && <div><i className="legend-dot heat" />Historical average LST</div>}
               {proposedGeometry && <div><i className="legend-dash" />PROPOSED site (scenario)</div>}
             </div>
+            {visibility.heat && (
+              <div className="heat-scale" role="group" aria-label="Heat areas colour scale">
+                <b>Heat areas — 2021 average surface temperature</b>
+                {heatLegend.status === 'ready' && heatLegend.data ? (
+                  <ul>
+                    {heatLegend.data.items.map((item, i) => (
+                      <li key={i}><img src={item.src} alt="" width="18" height="14" /><span>{item.label || '—'}</span></li>
+                    ))}
+                  </ul>
+                ) : heatLegend.status === 'loading' ? (
+                  <span className="limit-text">Loading the colour scale…</span>
+                ) : (
+                  <>
+                    <i className="heat-ramp wide" />
+                    <span className="heat-scale-ends"><em>cooler</em><em>hotter</em></span>
+                    <span className="limit-text">Relative scale: the map service did not provide exact temperature values for its colours.</span>
+                  </>
+                )}
+                <span className="limit-text">Satellite-derived land-surface temperature from a 2021 Tampa study — not air temperature or personal heat exposure.</span>
+              </div>
+            )}
           </div>
           <div className="map-caption">
             <span>Basemap: Esri World Imagery · MapLibre GL JS</span>
@@ -545,7 +614,7 @@ export default function App() {
 
         <aside className="right-panel panel">
           <div className="tab-bar" role="tablist">
-            {[['scan', 'EcoScan'], ['plan', `EcoPlan${plans.length ? ` (${plans.length})` : ''}`], ['ideas', 'Ideas ✨'], ['data', 'Data']].map(([k, label]) => (
+            {[['scan', 'EcoScan'], ['plan', `EcoPlan${plans.length ? ` (${plans.length})` : ''}`], ['ideas', 'Ideas'], ['data', 'Data']].map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'selected' : ''} onClick={() => setTab(k)}>{label}</button>
             ))}
           </div>
@@ -580,7 +649,7 @@ export default function App() {
             <IdeasPanel
               focus={ideaFocus} onFocus={setIdeaFocus} state={ideas} onBrainstorm={brainstorm}
               hasScan={scan.status === 'done'} siteNames={siteNames} health={health}
-              onOpenSite={(id) => { if (id.startsWith('path') && mission !== 'green') setMission('green'); else if (!id.startsWith('path') && mission === 'green') setMission('solar'); selectSite(id, { fly: true }); setTab('scan'); }}
+              onOpenSite={(id) => { if (id.startsWith('path') && mission !== 'green') setMission('green'); else if (id.startsWith('openspace') && mission !== 'plant') setMission('plant'); else if ((id.startsWith('parking') || id.startsWith('building')) && (mission === 'green' || mission === 'plant')) setMission('solar'); selectSite(id, { fly: true }); setTab('scan'); }}
               onAddSite={(id) => { const c = resolveCandidate(id); if (c) addToPlan(c); }}
             />
           )}

@@ -11,7 +11,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 // Per-site metrics worth carrying into the portfolio (keeps the pack under 60 metrics).
 const CARRY = [
   'base.mapped_area_m2', 'base.path_length_m', 'base.canopy_pct',
-  'scn.usable_area_m2', 'scn.capacity_kwdc', 'scn.pv_ac_annual_kwh', 'scn.capture_m3', 'scn.diverted_volume_m3', 'scn.proposed_tree_count',
+  'scn.usable_area_m2', 'scn.capacity_kwdc', 'scn.pv_ac_annual_kwh', 'scn.capture_m3', 'scn.diverted_volume_m3', 'scn.proposed_tree_count', 'scn.planting_area_m2',
 ];
 
 /**
@@ -60,7 +60,7 @@ export function buildPortfolioEvidence(plans) {
   if (totals.trees) tot('trees', `Total proposed trees — ${SCENARIO_LABEL}`, totals.trees, 'trees', 'Sum of per-site planting counts');
 
   const missions = sites.map((s) => s.evidence.mission);
-  const mission = ['solar', 'water', 'green'].sort((a, b) => missions.filter((m) => m === b).length - missions.filter((m) => m === a).length)[0];
+  const mission = ['solar', 'water', 'plant', 'green'].sort((a, b) => missions.filter((m) => m === b).length - missions.filter((m) => m === a).length)[0];
   return {
     siteId: `portfolio-${sites.length}`,
     siteName: `Campus portfolio (${sites.length} site${sites.length > 1 ? 's' : ''})`,

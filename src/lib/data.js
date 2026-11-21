@@ -268,6 +268,7 @@ export function clipFeatureCollectionToCampus(collection, campusFeature) {
 
 export function getFeatureTitle(feature, layerKey) {
   const p = feature?.properties || {};
+  if (layerKey === 'openspace') return p.name || 'Open space';
   if (layerKey === 'paths') return p.NAME || p.PATH_NAME || p.FULLNAME || p.LABEL || 'USF walkway';
   if (layerKey === 'greenspace') return p.NAME || p.LABEL || 'USF green space';
   if (layerKey === 'buildings') return p.LONGNAME || p.SHORTNAME || p.BUILDINGID || 'USF building';
@@ -293,4 +294,23 @@ export function getFeatureFacts(feature, layerKey) {
 
 export function toFeatureCollection(features = []) {
   return features.length ? { type: 'FeatureCollection', features } : emptyCollection();
+}
+
+/**
+ * Read a MapServer layer's colour legend (labels + swatch images) so the map can explain what
+ * the overlay colours mean. Returns null when the service has no usable legend.
+ */
+export async function loadLayerLegend(proxyPrefix, layerId, signal) {
+  const json = await getJson(`${proxyPrefix}/legend`, { f: 'pjson' }, signal);
+  const layer = (json.layers || []).find((l) => Number(l.layerId) === Number(layerId));
+  const items = (layer?.legend || []).slice(0, 14).map((entry) => {
+    const type = String(entry.contentType || '');
+    const okImage = /^image\/(png|jpeg|gif)$/.test(type) && typeof entry.imageData === 'string'
+      && entry.imageData.length < 20000 && /^[A-Za-z0-9+/=\s]+$/.test(entry.imageData);
+    return {
+      label: String(entry.label ?? '').slice(0, 60), // rendered as React text (escaped), so '<' / '>' ranges stay intact
+      src: okImage ? `data:${type};base64,${entry.imageData.replace(/\s/g, '')}` : null,
+    };
+  }).filter((item) => item.src);
+  return items.length ? { title: String(layer?.layerName || '').slice(0, 80), items } : null;
 }

@@ -185,6 +185,15 @@ describe('GIS proxy', () => {
     }
     expect(called).toBe(false);
   });
+  it('forwards the MapServer legend (used for the heat-areas colour scale) but nothing else new', async () => {
+    let url = '';
+    const fetchImpl = async (u) => { url = String(u); return { status: 200, headers: new Headers({ 'content-type': 'application/json' }), arrayBuffer: async () => new TextEncoder().encode('{"layers":[]}').buffer }; };
+    const app = createApp({ env: {}, fetchImpl });
+    const ok = await request(app).get('/gis/lst/legend?f=pjson');
+    expect(ok.status).toBe(200);
+    expect(url).toBe('https://gis.waterinstitute.usf.edu/arcgis/rest/services/Maps/Tampa_2021_TreeCanopy/MapServer/legend?f=pjson');
+    expect((await request(app).get('/gis/lst/identify')).status).toBe(404);
+  });
   it('returns 502 with no stack trace when upstream is down', async () => {
     const app = createApp({ env: {}, fetchImpl: async () => { throw new Error('ECONNREFUSED'); } });
     const res = await request(app).get('/gis/canopy/9/query?f=geojson');

@@ -22,3 +22,11 @@ Cached demo proposal, Judge Mode, bottom ranked bar, before/after overlay, fixtu
 - EcoPlan holds up to 6 sites with combined portfolio totals and a combined report.
 - Map pop-up with *Add to EcoPlan* on the selected site.
 - Ideas tab: Gemini brainstorm (verified; general ideas must contain no numbers) with rule-based fallback.
+
+## v4 changes
+- Left panel: MISSIONS (Solar, Water, Green planting) and a separate DATA sub-heading (Green zones, Heat areas).
+- Green planting mission = unbuilt open space (campus − buildings − parking − stadium/athletic buildings, min size/width filters). Appears only after a scan finds open space. Roads/ponds/athletic fields have no layer → field verification needed.
+- Heat areas colour scale read from the MapServer legend (`/gis/lst/legend`), with a clearly labelled relative fallback.
+- Priority filter bar can be closed/reopened; hidden outside the priority views.
+- Ranked candidates show a confidence dot (green/amber/red) instead of the word.
+- Report/PDF is US Letter (`@page size: letter`, ½-inch margins); PDF file name is set from the site ID.

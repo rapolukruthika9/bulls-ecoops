@@ -38,6 +38,13 @@ export const SOURCES = {
     kind: 'public-gis',
     note: 'Mapped parking surface; not all area can be covered.',
   },
+  'src-openspace': {
+    id: 'src-openspace',
+    title: 'Derived open-space screening (USF campus boundary minus building footprints, parking lots and stadium/athletic buildings)',
+    url: null,
+    kind: 'method',
+    note: 'Computed in code from public USF GIS polygons. May still include roads, ponds, athletic fields or utilities — field verification required.',
+  },
   'src-pvwatts': {
     id: 'src-pvwatts',
     title: 'NLR PVWatts V8 (modelled annual AC output)',
