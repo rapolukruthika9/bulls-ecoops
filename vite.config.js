@@ -1,17 +1,23 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Same-origin development proxy for public ArcGIS REST services.
-// Rewriting to full remote paths avoids ambiguity when proxy targets contain
-// their own URL pathname segments.
-const serviceProxy = (target, prefix, remotePath) => ({
-  target,
-  changeOrigin: true,
-  secure: true,
-  rewrite: (path) => path.replace(prefix, remotePath),
-  timeout: 45000,
-  proxyTimeout: 45000,
-});
+import { GIS_UPSTREAMS } from './shared/gis-upstreams.js';
+
+// Same-origin development proxy for public ArcGIS REST services (production uses the Express
+// proxy in server/app.js). Both read the same upstream table in shared/gis-upstreams.js.
+const gisProxy = Object.fromEntries(
+  Object.entries(GIS_UPSTREAMS).map(([name, { origin, path }]) => [
+    `/gis/${name}`,
+    {
+      target: origin,
+      changeOrigin: true,
+      secure: true,
+      rewrite: (p) => p.replace(`/gis/${name}`, path),
+      timeout: 45000,
+      proxyTimeout: 45000,
+    },
+  ]),
+);
 
 export default defineConfig({
   plugins: [react()],
@@ -21,32 +27,10 @@ export default defineConfig({
     strictPort: true,
     open: true,
     proxy: {
-      '/gis/campus': serviceProxy(
-        'https://services6.arcgis.com',
-        '/gis/campus',
-        '/eohpBf8Xt7P2A4up/ArcGIS/rest/services/USF_Campus_Boundaries/FeatureServer',
-      ),
-      '/gis/buildings': serviceProxy(
-        'https://services6.arcgis.com',
-        '/gis/buildings',
-        '/eohpBf8Xt7P2A4up/ArcGIS/rest/services/USF_Building_Footprints/FeatureServer',
-      ),
-      '/gis/parking': serviceProxy(
-        'https://services6.arcgis.com',
-        '/gis/parking',
-        '/eohpBf8Xt7P2A4up/ArcGIS/rest/services/Parking_Lots_Garages/FeatureServer',
-      ),
-      '/gis/canopy': serviceProxy(
-        'https://gis.waterinstitute.usf.edu',
-        '/gis/canopy',
-        '/arcgis/rest/services/Maps/Tampa_2021_TreeCanopy/MapServer',
-      ),
-      '/gis/lst': serviceProxy(
-        'https://gis.waterinstitute.usf.edu',
-        '/gis/lst',
-        '/arcgis/rest/services/Maps/Tampa_2021_TreeCanopy/MapServer',
-      ),
+      ...gisProxy,
+      '/api': { target: 'http://127.0.0.1:3001', changeOrigin: false },
     },
   },
   preview: { host: '127.0.0.1', port: 4173, strictPort: true },
+  build: { chunkSizeWarningLimit: 2500 },
 });
