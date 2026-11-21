@@ -125,8 +125,7 @@ function sumAreaDissolved(pieces) {
  * @param {{paths?:object, canopy?:object, parking?:object, buildings?:object, greenspace?:object}} data
  *   validated FeatureCollections (null/undefined when a layer is unavailable)
  */
-export function createEngine(data /* {campus, paths, canopy, parking, buildings, greenspace} */, expected = { paths: true, greenspace: true }, options = {}) {
-  const isDemo = Boolean(options.demo); // synthetic demo geometry: carried on every candidate
+export function createEngine(data /* {campus, paths, canopy, parking, buildings, greenspace} */, expected = { paths: true, greenspace: true }) {
   const available = {
     paths: Boolean(data.paths?.features?.length),
     canopy: Boolean(data.canopy?.features?.length),
@@ -213,7 +212,6 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
       id: `${SITE_PREFIX.paths}-${objectId}`,
       objectId,
       kind: 'path',
-      demo: isDemo,
       mission: 'green',
       layerKey: 'paths',
       lon,
@@ -274,7 +272,6 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
       id: `${kind}-${objectId}`,
       objectId,
       kind,
-      demo: isDemo,
       layerKey,
       lon: pt.geometry.coordinates[0],
       lat: pt.geometry.coordinates[1],
@@ -383,8 +380,7 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
         id: `openspace-${objectId}`,
         objectId,
         kind: 'openspace',
-        demo: isDemo,
-        mission: 'plant',
+          mission: 'plant',
         layerKey: 'openspace',
         lon,
         lat,

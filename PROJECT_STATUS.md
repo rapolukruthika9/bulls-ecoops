@@ -34,5 +34,5 @@ Cached demo proposal, Judge Mode, bottom ranked bar, before/after overlay, fixtu
 ## v5 changes
 - Server-built PDF (`POST /api/report-pdf`, pdfkit): Letter or A4, vector text, headline banner, tables, footer page numbers. Replaces reliance on browser print scaling.
 - Scoring weights: Solar now has a second real factor that works without walkway data (distance to nearest building, a load-proximity proxy). When only one factor has data the sliders lock and say why; "Reset" only appears after a change.
-- Demo data mode (synthetic, clearly labelled, carried through evidence/report/PDF/Ideas).
+- (Demo data mode was added and then removed again: it made the map messy.)
 - Not verified: live USF data, real Gemini output, real PVWatts (no network/keys in the build sandbox).

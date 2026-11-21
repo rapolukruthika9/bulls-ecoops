@@ -147,7 +147,7 @@ export default function ScanPanel({
             {activeCount < 2 && (
               <p className="warn-text">
                 Only one factor has data right now{unusedTerms.length ? ` (no data for: ${unusedTerms.map((t) => t.label.replace('Normalized ', '')).join(', ')})` : ''}, so the weights cannot change the ranking and the sliders are locked.
-                Another factor appears when its layer loads (or turn on Demo data).
+                Another factor becomes available when its data layer loads.
               </p>
             )}
             {terms.map((t) => {
