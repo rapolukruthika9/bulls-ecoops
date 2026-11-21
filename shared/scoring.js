@@ -74,6 +74,8 @@ export const MISSION_TERMS = {
   solar: [
     { key: 'area', label: 'Normalized usable area', get: (c) => c.raw.usableAreaM2, normalize: true },
     { key: 'walk', label: 'Normalized path adjacency', get: (c) => (Number.isFinite(c.raw.pathDistanceM) ? -c.raw.pathDistanceM : null), normalize: true },
+    // Closer to a building = shorter run to an existing electrical load (a screening proxy, not an interconnection study).
+    { key: 'load', label: 'Normalized load proximity (nearer a building)', get: (c) => (Number.isFinite(c.raw.loadDistanceM) ? -c.raw.loadDistanceM : null), normalize: true },
   ],
   water: [
     { key: 'catchment', label: 'Normalized catchment area', get: (c) => c.raw.catchmentAreaM2, normalize: true },
@@ -85,14 +87,14 @@ export const MISSION_TERMS = {
 export const DEFAULT_WEIGHTS = {
   plant: { area: 0.6, shape: 0.4 },
   green: { exposure: 0.7, length: 0.3 },
-  solar: { area: 0.6, walk: 0.4 },
+  solar: { area: 0.5, walk: 0.2, load: 0.3 },
   water: { catchment: 0.4, paved: 0.3, green: 0.3 },
 };
 
 export const FORMULAS = {
   plant: 'plant_screen_score = 100 × (w_area × normalized_open_area + w_shape × normalized_compactness)',
   green: 'green_score = 100 × (w_exposure × low_canopy_fraction + w_length × normalized_path_length)',
-  solar: 'solar_screen_score = 100 × (w_area × normalized_usable_area + w_walk × normalized_path_adjacency)',
+  solar: 'solar_screen_score = 100 × (w_area × normalized_usable_area + w_walk × normalized_path_adjacency + w_load × normalized_load_proximity)',
   water: 'water_screen_score = 100 × (w_catchment × normalized_catchment_area + w_paved × normalized_paved_area + w_green × normalized_green_space_adjacency)',
 };
 

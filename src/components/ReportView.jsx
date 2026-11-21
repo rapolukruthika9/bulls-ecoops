@@ -1,30 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { requestReportPdf } from '../lib/api.js';
+import { pickStats, statBadge } from '../../shared/reportStats.js';
 import { ALLOWED_URLS, SOURCES, SCENARIO_LABEL, SCREENING_DISCLAIMER } from '../../shared/sources.js';
 
 const fmt = (v, d = 2) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d });
-
-// Headline numbers shown as big stat cards, in order of "wow". Values come straight from the
-// computed evidence metrics (never from model prose), so a judge can trust every figure.
-const STAT_PRIORITY = [
-  ['tot.capacity_kwdc', 'solar capacity'], ['tot.pv_kwh', 'modelled kWh / year'], ['tot.capture_m3', 'rainwater per event'], ['tot.trees', 'trees proposed'],
-  ['scn.pv_ac_annual_kwh', 'modelled kWh / year'], ['scn.capacity_kwdc', 'solar capacity'], ['scn.capture_m3', 'rainwater per event'],
-  ['scn.diverted_volume_m3', 'to rain garden'], ['scn.proposed_tree_count', 'trees proposed'],
-  ['scn.planting_area_m2', 'planted area'], ['tot.area_m2', 'surface screened'], ['base.mapped_area_m2', 'mapped surface'], ['base.low_canopy_pct', 'low-canopy exposure'],
-];
-
-function pickStats(evidence) {
-  const byId = new Map(evidence.metrics.map((m) => [m.id, m]));
-  const stats = [];
-  const seenLabel = new Set();
-  for (const [id, caption] of STAT_PRIORITY) {
-    const m = byId.get(id);
-    if (!m || seenLabel.has(caption)) continue;
-    seenLabel.add(caption);
-    stats.push({ m, caption });
-    if (stats.length === 4) break;
-  }
-  return stats;
-}
 
 export default function ReportView({ report, evidence, onClose }) {
   const { proposal: p, source, model, warnings = [], generatedAt } = report;
@@ -38,6 +17,25 @@ export default function ReportView({ report, evidence, onClose }) {
   const takeaways = (p.key_takeaways && p.key_takeaways.length ? p.key_takeaways : p.baseline_claims.map((c) => c.text)).slice(0, 4);
   const headline = p.headline || p.executive_summary;
   const isPortfolio = evidence.intervention === 'portfolio';
+  const [paper, setPaper] = useState('letter');
+  const [pdfState, setPdfState] = useState({ status: 'idle' });
+  async function downloadPdf() {
+    setPdfState({ status: 'loading' });
+    try {
+      const blob = await requestReportPdf({ evidence, proposal: p, source, model, paper });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `BULLS-ECOOPS-${isPortfolio ? 'portfolio' : evidence.siteId}-${paper}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setPdfState({ status: 'done' });
+    } catch (error) {
+      setPdfState({ status: 'error', message: `${error.message} You can still use Print.` });
+    }
+  }
   const fileTitle = `BULLS-ECOOPS-${isPortfolio ? 'portfolio' : evidence.siteId}-report`;
 
   // Chrome/Edge use the page title as the default PDF file name; restore it afterwards.
@@ -54,8 +52,19 @@ export default function ReportView({ report, evidence, onClose }) {
     <div className="report-overlay" role="dialog" aria-modal="true" aria-label="Proposal report">
       <div className="report-toolbar no-print">
         <button className="secondary-button" onClick={onClose}>← Back to map</button>
-        <span className="toolbar-hint">Letter size (8.5 × 11 in) · choose “Save as PDF” as the destination</span>
-        <button className="primary-button" onClick={() => window.print()}>Download PDF (Letter)</button>
+        <span className="toolbar-hint">
+          {pdfState.status === 'error' ? pdfState.message : pdfState.status === 'done' ? 'PDF downloaded.' : 'Built on the server as a real PDF page.'}
+        </span>
+        <label className="paper-select">Paper
+          <select value={paper} onChange={(e) => setPaper(e.target.value)} aria-label="Paper size">
+            <option value="letter">US Letter (8.5 × 11 in)</option>
+            <option value="a4">A4 (210 × 297 mm)</option>
+          </select>
+        </label>
+        <button className="secondary-button" onClick={() => window.print()}>Print…</button>
+        <button className="primary-button" onClick={downloadPdf} disabled={pdfState.status === 'loading'}>
+          {pdfState.status === 'loading' ? 'Building PDF…' : 'Download PDF'}
+        </button>
       </div>
       <article className="report">
         <header>
@@ -67,6 +76,11 @@ export default function ReportView({ report, evidence, onClose }) {
         </header>
 
         {/* ---------- At a glance ---------- */}
+        {evidence.demo && (
+          <div className="report-banner warn demo-banner" role="note">
+            <b>DEMO DATA</b> — this report uses synthetic geometry generated for testing. It is not USF data; do not cite these figures as real campus measurements.
+          </div>
+        )}
         <section className="hero" aria-label="Project at a glance">
           <div className="hero-kicker">THE PROJECT IN ONE LINE</div>
           <p className="hero-headline">{headline}</p>
@@ -76,7 +90,7 @@ export default function ReportView({ report, evidence, onClose }) {
                 <div className="stat-card" key={m.id}>
                   <div className="stat-value">{fmt(m.value, Math.abs(m.value) >= 100 ? 0 : 1)}<small>{m.unit}</small></div>
                   <div className="stat-caption">{caption}</div>
-                  <span className={`status-badge st-${m.status}`}>{m.status === 'measured' ? 'measured from GIS' : m.status === 'model' ? 'scenario estimate' : 'assumption'}</span>
+                  <span className={`status-badge st-${m.status}`}>{statBadge(m.status)}</span>
                 </div>
               ))}
             </div>
@@ -121,7 +135,7 @@ export default function ReportView({ report, evidence, onClose }) {
           <h2>Scenario inputs and assumptions</h2>
           <table className="report-table">
             <thead><tr><th>Assumption</th><th>Value</th><th>Origin</th></tr></thead>
-            <tbody>{assumptions.map((m) => <tr key={m.id}><td>{m.label}</td><td>{fmt(m.value)} {m.unit}</td><td>User-declared</td></tr>)}</tbody>
+            <tbody>{assumptions.map((m) => <tr key={m.id}><td>{m.label}</td><td>{fmt(m.value)} {m.unit}</td><td>{m.id.startsWith('score.weight') ? 'Adjustable weight' : 'User-declared'}</td></tr>)}</tbody>
           </table>
         </section>
 

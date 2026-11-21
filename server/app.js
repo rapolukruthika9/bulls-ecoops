@@ -10,6 +10,9 @@ import { SiteEvidenceSchema } from '../shared/proposal.js';
 import { GIS_UPSTREAMS, ALLOWED_GIS_PATH } from '../shared/gis-upstreams.js';
 import { generateVerifiedProposal, generateVerifiedIdeas, DEFAULT_MODEL } from './services/gemini.js';
 import { BrainstormContextSchema } from '../shared/brainstorm.js';
+import { ProposalSchema, verifyProposal, buildFallbackProposal } from '../shared/proposal.js';
+import { buildPortfolioFallback } from '../shared/portfolio.js';
+import { renderReportPdf, PAPERS } from './services/reportPdf.js';
 import { estimateSolar, SolarRequestSchema } from './services/pvwatts.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -100,6 +103,39 @@ export function createApp({
       return res.json({ ...result, generatedAt: new Date().toISOString(), verified: true });
     } catch (error) {
       return res.status(502).json({ error: 'Brainstorm could not be verified.', detail: String(error?.message || error).slice(0, 160) });
+    }
+  });
+
+  // ---------- PDF report (Letter or A4) ----------
+  app.post('/api/report-pdf', rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }), async (req, res) => {
+    const evidence = SiteEvidenceSchema.safeParse(req.body?.evidence);
+    if (!evidence.success) return res.status(400).json({ error: 'Invalid evidence', issues: evidence.error.issues.slice(0, 5).map((i) => `${i.path.join('.')}: ${i.message}`) });
+    const paper = req.body?.paper === 'a4' ? 'a4' : 'letter';
+    if (!PAPERS[paper]) return res.status(400).json({ error: 'Unknown paper size' });
+    // The proposal is re-verified against the evidence; anything that fails is replaced by the
+    // deterministic template so a PDF can never carry an unverified claim.
+    let proposal = req.body?.proposal;
+    let verifyNote = null;
+    const check = ProposalSchema.safeParse(proposal).success ? verifyProposal(proposal, evidence.data) : { ok: false };
+    if (!check.ok) {
+      proposal = evidence.data.intervention === 'portfolio' ? buildPortfolioFallback(evidence.data) : buildFallbackProposal(evidence.data);
+      verifyNote = 'Proposal generation could not be verified. Review the site metrics and source links.';
+    } else proposal = check.proposal;
+    try {
+      const pdf = await renderReportPdf({
+        proposal, evidence: evidence.data, verifyNote,
+        source: req.body?.source === 'gemini' && check.ok ? 'gemini' : 'fallback',
+        model: typeof req.body?.model === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(req.body.model) ? req.body.model : null,
+        generatedAt: new Date().toISOString(),
+      }, paper);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="BULLS-ECOOPS-${evidence.data.siteId}-${paper}.pdf"`,
+        'Cache-Control': 'no-store',
+      });
+      return res.send(pdf);
+    } catch (error) {
+      return res.status(500).json({ error: 'Could not render the PDF report.', detail: String(error?.message || error).slice(0, 120) });
     }
   });
 

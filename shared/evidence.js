@@ -47,7 +47,9 @@ const KIND_SOURCE = { path: 'src-paths', parking: 'src-parking', building: 'src-
 export function buildSiteEvidence({ candidate, components, assumptions, pv = null, score = null }) {
   const a = assumptions;
   const raw = candidate.raw;
-  const kindSrc = KIND_SOURCE[candidate.kind];
+  const demo = Boolean(candidate.demo);
+  // Demo geometry is synthetic: it must never be attributed to a real USF source.
+  const kindSrc = demo ? 'src-demo' : KIND_SOURCE[candidate.kind];
   const metrics = [];
   const sourceIds = new Set([kindSrc]);
   const used = {}; // assumptions actually used → echoed in evidence
@@ -66,7 +68,7 @@ export function buildSiteEvidence({ candidate, components, assumptions, pv = nul
     );
     useA('bufferM');
   } else if (candidate.kind === 'openspace') {
-    sourceIds.add('src-buildings'); sourceIds.add('src-parking');
+    if (demo) sourceIds.add('src-demo'); else { sourceIds.add('src-buildings'); sourceIds.add('src-parking'); }
     metrics.push(
       metric('base.mapped_area_m2', 'Unbuilt open-space area', raw.mappedAreaM2, 'm²', 'Turf difference(): campus boundary − buffered buildings/parking/stadiums; area()', 'src-openspace', 'measured'),
       metric('base.compactness', 'Compactness index (1 = circle)', raw.compactness, '', '4π × area ÷ perimeter²', 'src-openspace', 'measured'),
@@ -84,6 +86,10 @@ export function buildSiteEvidence({ candidate, components, assumptions, pv = nul
       metric('base.mapped_area_m2', candidate.kind === 'building' ? 'Building footprint area (roof proxy)' : 'Mapped parking surface area',
         raw.mappedAreaM2, 'm²', 'Turf area() on source polygon', kindSrc, 'measured'),
     );
+    if (candidate.kind === 'parking' && Number.isFinite(raw.loadDistanceM)) {
+      metrics.push(metric('base.load_distance_m', 'Distance to nearest building', raw.loadDistanceM, 'm', 'Turf pointToLineDistance() from site centroid to building outlines (capped at 300 m)', demo ? 'src-demo' : KIND_SOURCE.building, 'measured'));
+      sourceIds.add(demo ? 'src-demo' : KIND_SOURCE.building);
+    }
     if (Number.isFinite(raw.pathDistanceM)) {
       sourceIds.add('src-paths');
       metrics.push(metric('base.path_distance_m', 'Distance to nearest mapped path', raw.pathDistanceM, 'm', 'Turf pointToLineDistance() from site centroid', 'src-paths', 'measured'));
@@ -207,6 +213,7 @@ export function buildSiteEvidence({ candidate, components, assumptions, pv = nul
     siteName: candidate.name,
     mission: candidate.mission || (candidate.kind === 'openspace' ? 'plant' : candidate.kind === 'path' ? 'green' : components.includes('solar') ? 'solar' : 'water'),
     intervention: interventionName(candidate.kind, components),
+    ...(demo ? { demo: true } : {}),
     metrics,
     sourceIds: [...sourceIds],
     assumptions: Object.fromEntries(Object.entries(used).filter(([, v]) => v !== null && v !== undefined)),

@@ -125,7 +125,8 @@ function sumAreaDissolved(pieces) {
  * @param {{paths?:object, canopy?:object, parking?:object, buildings?:object, greenspace?:object}} data
  *   validated FeatureCollections (null/undefined when a layer is unavailable)
  */
-export function createEngine(data /* {campus, paths, canopy, parking, buildings, greenspace} */, expected = { paths: true, greenspace: true }) {
+export function createEngine(data /* {campus, paths, canopy, parking, buildings, greenspace} */, expected = { paths: true, greenspace: true }, options = {}) {
+  const isDemo = Boolean(options.demo); // synthetic demo geometry: carried on every candidate
   const available = {
     paths: Boolean(data.paths?.features?.length),
     canopy: Boolean(data.canopy?.features?.length),
@@ -155,6 +156,31 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
         rings: polygon.filter((r) => r.length >= 2).map((r) => lineString(r)),
       });
     }
+  }
+
+  // Building outlines for the load-proximity factor (distance from a lot to the nearest building).
+  const buildingRings = [];
+  for (const feature of data.buildings?.features || []) {
+    for (const polygonCoords of polygonParts(feature)) {
+      const outer = polygonCoords[0];
+      if (!outer || outer.length < 3) continue;
+      const line = lineString(outer);
+      buildingRings.push({ line, box: bbox(line) });
+    }
+  }
+
+  function nearestBuildingDistanceM(pt) {
+    if (!buildingRings.length) return null;
+    const [x, y] = pt.geometry.coordinates;
+    const probe = [x, y, x, y];
+    let best = Infinity;
+    for (const b of buildingRings) {
+      if (!bboxOverlap(expand(b.box, DEFAULTS.nearbyDeg), probe)) continue;
+      const d = pointToLineDistance(pt, b.line, { units: 'meters' });
+      if (d < best) best = d;
+    }
+    // Nothing within the ~300 m search window: report the window itself (a documented cap).
+    return Number.isFinite(best) ? best : 300;
   }
 
   function canopyOverlap(buffered) {
@@ -187,6 +213,7 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
       id: `${SITE_PREFIX.paths}-${objectId}`,
       objectId,
       kind: 'path',
+      demo: isDemo,
       mission: 'green',
       layerKey: 'paths',
       lon,
@@ -247,6 +274,7 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
       id: `${kind}-${objectId}`,
       objectId,
       kind,
+      demo: isDemo,
       layerKey,
       lon: pt.geometry.coordinates[0],
       lat: pt.geometry.coordinates[1],
@@ -262,6 +290,8 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
         pavedAreaM2: kind === 'parking' ? mappedAreaM2 : 0,
         pathDistanceM,
         greenDistanceM: greenDist,
+        // A building roof is itself the load; a parking lot is measured to the nearest building outline.
+        loadDistanceM: kind === 'building' ? 0 : nearestBuildingDistanceM(pt),
       },
     };
   }
@@ -353,6 +383,7 @@ export function createEngine(data /* {campus, paths, canopy, parking, buildings,
         id: `openspace-${objectId}`,
         objectId,
         kind: 'openspace',
+        demo: isDemo,
         mission: 'plant',
         layerKey: 'openspace',
         lon,
