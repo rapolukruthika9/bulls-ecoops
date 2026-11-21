@@ -1,28 +1,16 @@
-# BULLS ECOOPS — MapLibre Thematic Layers Build
+# Status
 
-## What this build adds
-- MapLibre satellite-first 2D campus map.
-- Existing Tampa 2021 tree-canopy overlay using MapServer layer 9 filtered to `LandCover = 'Tree Canopy'`.
-- Potential planting-zone overlay using Tampa 2021 Tree Canopy MapServer layer 10.
-- Historical average land-surface-temperature overlay using MapServer layer 15.
-- Thematic overlays render as transparent raster exports directly on the map, independently of the FeatureServer identify/query pipeline.
-- Campus boundary, USF building footprints and surface parking lots remain separate vector query/selection layers.
-- Data load is started directly from the MapLibre `load` event and no longer returns early based on `isStyleLoaded()` while raster basemap tiles are still loading.
-- Vite proxy routes now rewrite to explicit full remote paths.
+## Done (verified by tests)
+- Scenario math, scoring, evidence pack, proposal verifier + fallback (`tests/shared.test.js`)
+- Turf EcoScan engine incl. empty/overlapping/multipart/invalid-geometry cases (`tests/gis.test.js`)
+- Express API: health, PVWatts, Gemini proposal w/ guardrails, rate limit, GIS proxy allow-list (`tests/server.test.js`)
+- UI smoke-tested headless against a synthetic campus: layers → scan → ranking → planner → report
 
-## Important data limitations
-- The tree canopy, potential planting and LST layers are from the Tampa 2021 study. They are not live measurements.
-- Layer 15 is average land-surface temperature context, not air temperature or a live heat sensor.
-- Layer 10 is study-designated potential planting polygons, not an engineering or field approval.
-- The raster overlays are map visuals; measurements and candidate rankings must continue to come from source feature geometry and documented formulas.
+## NOT yet verified (needs a machine with network / keys)
+- Live USF/ArcGIS responses (layer 11/18 field names, record counts, CRS) — run `npm run snapshot` and the GO/NO-GO check
+- Real Gemini output (needs `GEMINI_API_KEY`; model default `gemini-2.5-flash`, override with `GEMINI_MODEL`)
+- Real PVWatts (needs `NLR_API_KEY`; endpoint default developer.nlr.gov, override `PVWATTS_URL`)
+- Deployment (Render) — `npm run build && npm start` serves everything from one service
 
-## Run
-```powershell
-npm install
-npm run dev
-```
-
-## Verification status
-- JavaScript module syntax and JSX structure checked.
-- ZIP structure checked.
-- Live browser rendering against remote ArcGIS services still needs verification on the user's machine.
+## Next
+Cached demo proposal, Judge Mode, bottom ranked bar, before/after overlay, fixture-savings calculator.

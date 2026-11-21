@@ -25,7 +25,50 @@ export const DATASETS = {
     type: 'polygon',
     objectIdField: 'OBJECTID',
   },
+  // USF University Facilities Community Maps layers (plan: layer 11 paths, layer 18 green space)
+  paths: {
+    label: 'USF sidewalks / footpaths',
+    url: '/gis/usfmaps/11/query',
+    type: 'line',
+    objectIdField: 'OBJECTID',
+    sourceId: 'src-paths',
+  },
+  greenspace: {
+    label: 'USF campus green space',
+    url: '/gis/usfmaps/18/query',
+    type: 'polygon',
+    objectIdField: 'OBJECTID',
+    sourceId: 'src-green',
+  },
 };
+
+// Base prefix for same-origin GIS proxy URLs. Empty in the browser; the snapshot script
+// points it at a local server instance.
+let gisBase = '';
+export function setGisBase(base) { gisBase = base || ''; }
+const withBase = (url) => `${gisBase}${url}`;
+
+const objectIdCache = new Map();
+/** Read layer metadata (plan: metadata first) to learn the real OID field name and page size. */
+export async function readLayerMeta(datasetKey, signal) {
+  if (objectIdCache.has(datasetKey)) return objectIdCache.get(datasetKey);
+  const dataset = DATASETS[datasetKey];
+  const fallback = { objectIdField: dataset.objectIdField || 'OBJECTID', maxRecordCount: 1000, name: dataset.label, wkid: null };
+  try {
+    const json = await getJson(dataset.url.replace(/\/query$/, ''), { f: 'pjson' }, signal);
+    const oid = (json.fields || []).find((f) => f.type === 'esriFieldTypeOID');
+    const meta = {
+      objectIdField: oid?.name || fallback.objectIdField,
+      maxRecordCount: Number(json.maxRecordCount) || fallback.maxRecordCount,
+      name: json.name || fallback.name,
+      wkid: json.extent?.spatialReference?.latestWkid || json.extent?.spatialReference?.wkid || null,
+    };
+    objectIdCache.set(datasetKey, meta);
+    return meta;
+  } catch {
+    return fallback; // not cached: retry next time
+  }
+}
 
 const emptyCollection = () => ({ type: 'FeatureCollection', features: [] });
 
@@ -86,7 +129,7 @@ async function parseJsonResponse(response, url) {
 
 async function getJson(url, params, signal) {
   const query = new URLSearchParams(params);
-  const response = await fetch(`${url}?${query.toString()}`, {
+  const response = await fetch(`${withBase(url)}?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -96,7 +139,7 @@ async function getJson(url, params, signal) {
 
 async function postJson(url, params, signal) {
   const body = new URLSearchParams(params);
-  const response = await fetch(url, {
+  const response = await fetch(withBase(url), {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -131,13 +174,15 @@ export async function loadCampusBoundary(signal) {
 
 export async function queryCampusFeatures(datasetKey, campusFeature, signal, onPage) {
   const dataset = DATASETS[datasetKey];
+  const meta = await readLayerMeta(datasetKey, signal);
   const esriGeometry = JSON.stringify(geometryToEsriJson(campusFeature.geometry));
-  const recordCount = datasetKey === 'canopy' ? 1500 : 900;
+  const wanted = datasetKey === 'canopy' ? 1500 : 900;
+  const recordCount = Math.max(100, Math.min(wanted, meta.maxRecordCount));
   const allFeatures = [];
   let offset = 0;
   let pages = 0;
 
-  while (pages < 12) {
+  while (pages < 20) {
     const json = await postJson(dataset.url, {
       where: datasetKey === 'canopy' ? "LandCover = 'Tree Canopy'" : '1=1',
       geometry: esriGeometry,
@@ -151,7 +196,7 @@ export async function queryCampusFeatures(datasetKey, campusFeature, signal, onP
       returnM: 'false',
       resultOffset: String(offset),
       resultRecordCount: String(recordCount),
-      orderByFields: `${dataset.objectIdField} ASC`,
+      orderByFields: `${meta.objectIdField} ASC`,
       f: 'geojson',
     }, signal);
 
@@ -159,11 +204,47 @@ export async function queryCampusFeatures(datasetKey, campusFeature, signal, onP
     allFeatures.push(...features);
     pages += 1;
     if (onPage) onPage(allFeatures.length);
-    if (features.length < recordCount) break;
+    // Servers may cap a page below what we asked for (exceededTransferLimit), so only an
+    // empty page, or a short page without that flag, ends pagination.
+    const more = json.exceededTransferLimit || json.properties?.exceededTransferLimit;
+    if (features.length === 0 || (features.length < recordCount && !more)) break;
     offset += features.length;
   }
 
   return { type: 'FeatureCollection', features: allFeatures };
+}
+
+/**
+ * Load one dataset for the campus. Live query first; if the service is unreachable fall back
+ * to a cached public snapshot in /data (written by `npm run snapshot`) and say so.
+ * Returns { collection, origin: 'live'|'snapshot', retrievedAt, count }.
+ */
+export async function loadDataset(datasetKey, campusFeature, signal, onPage) {
+  const dataset = DATASETS[datasetKey];
+  try {
+    const queried = await queryCampusFeatures(datasetKey, campusFeature, signal, onPage);
+    const collection = dataset.type === 'polygon' ? clipFeatureCollectionToCampus(queried, campusFeature) : queried;
+    if (!collection.features.length) throw new Error('No features intersect the official USF Tampa boundary.');
+    return { collection, origin: 'live', retrievedAt: new Date().toISOString(), count: collection.features.length };
+  } catch (liveError) {
+    if (signal?.aborted) throw liveError;
+    try {
+      const response = await fetch(withBase(`/data/${datasetKey}.geojson`), { signal });
+      const type = response.headers.get('content-type') || '';
+      if (!response.ok || /text\/html/i.test(type)) throw new Error('no snapshot');
+      const snapshot = await response.json();
+      if (!snapshot?.features?.length) throw new Error('empty snapshot');
+      return {
+        collection: { type: 'FeatureCollection', features: snapshot.features },
+        origin: 'snapshot',
+        retrievedAt: snapshot.bullsMeta?.retrievedAt || null,
+        count: snapshot.features.length,
+        liveError: liveError instanceof Error ? liveError.message : String(liveError),
+      };
+    } catch {
+      throw liveError;
+    }
+  }
 }
 
 export function clipFeatureCollectionToCampus(collection, campusFeature) {
@@ -187,6 +268,8 @@ export function clipFeatureCollectionToCampus(collection, campusFeature) {
 
 export function getFeatureTitle(feature, layerKey) {
   const p = feature?.properties || {};
+  if (layerKey === 'paths') return p.NAME || p.PATH_NAME || p.FULLNAME || p.LABEL || 'USF walkway';
+  if (layerKey === 'greenspace') return p.NAME || p.LABEL || 'USF green space';
   if (layerKey === 'buildings') return p.LONGNAME || p.SHORTNAME || p.BUILDINGID || 'USF building';
   if (layerKey === 'parking') return p.LOT_NUMBER ? `Parking lot ${p.LOT_NUMBER}` : (p.LOT_ID || 'Surface parking lot');
   if (layerKey === 'canopy') return p.LandCover || 'Tree canopy polygon';
@@ -199,6 +282,8 @@ export function getFeatureFacts(feature, layerKey) {
     ? ['BUILDINGID', 'SHORTNAME', 'LONGNAME', 'BLDGTYPE', 'BLDGHEIGHT', 'FLOORCOUNT', 'GSF', 'BUILDING_STATUS']
     : layerKey === 'parking'
       ? ['LOT_NUMBER', 'LOT_ID', 'LOT_SPACES', 'PERMITS', 'ADA_SPOTS', 'SQUARE_FT', 'BUILDING_NAME']
+      : layerKey === 'paths' || layerKey === 'greenspace'
+        ? ['NAME', 'LABEL', 'TYPE', 'SURFACE', 'Shape__Length', 'Shape__Area']
       : layerKey === 'canopy'
         ? ['LandCover', 'LandCoverSimple', 'PotentialPlanting_YN', 'Value', 'Shape_Area']
         : ['CAMPUS', 'CAMPUS_ACREAGE', 'PROPERTY_TYPE', 'LABEL'];

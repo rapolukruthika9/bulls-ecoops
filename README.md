@@ -1,36 +1,43 @@
-# BULLS ECOOPS — MapLibre campus map
+# BULLS ECOOPS — USF Campus Environmental Intelligence & Action Center
 
-A satellite-first campus GIS prototype for the University of South Florida Tampa campus.
+Independent student prototype (not an official USF recommendation). Public campus GIS →
+Turf.js screening → evidence pack → Gemini explanation → printable proposal.
 
-## Run on Windows
-1. Extract the ZIP.
-2. Open the `BULLS_ECOOPS_MAPLIBRE_LAYERS` folder in VS Code (the folder containing `package.json`).
-3. Open Terminal → New Terminal.
-4. Run:
-
-```powershell
-npm install
-npm run dev
+```
+USF/ArcGIS layers → GIS proxy → Turf.js EcoScan → ranked candidates (visible weights)
+      → EcoPlan scenario math → Evidence pack (metric IDs + sources) → Gemini JSON → verifier → report
 ```
 
-5. Open the local URL printed by Vite, normally `http://127.0.0.1:5173/`. Keep the terminal open.
+## Run
+```bash
+npm install
+cp .env.example .env        # add GEMINI_API_KEY (and NLR_API_KEY for PVWatts). Keys stay server-side.
+npm run dev:all             # Vite on :5173 + Express API on :3001
+npm test                    # shared math, GIS engine, server/guardrail tests
+npm run build && npm start  # production: Express serves dist + API + GIS proxy on :3001
+npm run snapshot            # (needs network) cache public GeoJSON into public/data as a labelled fallback
+```
 
-You can also double-click `RUN_ME_FIRST.bat`.
+## What it does
+- **Layer toggles** — Green (canopy, planting, green space), Water, Parking & solar, Heat (2021 LST study), each individually toggleable.
+- **EcoScan** (`src/lib/gis.js`) — *ANALYZE CAMPUS* buffers every walkway, intersects with dissolved canopy, and screens parking/roof polygons for area, walkway adjacency and green-space adjacency. Results render as a **priority heat-map + scored outlines** and a ranked list.
+- **EcoPrioritize** (`shared/scoring.js`) — min-max normalised, adjustable weights, formula and raw inputs shown. Scores are never comparable across missions.
+- **EcoPlan** (`shared/scenarios.js`, `shared/evidence.js`) — solar capacity (+ optional PVWatts V8), rainwater capture, rain garden, planting count. Everything is labelled SCENARIO ESTIMATE and echoes its assumptions.
+- **Gemini** (`server/services/gemini.js`, `shared/proposal.js`) — receives only computed metrics. Output is Zod-validated; every metric ID, source ID, URL and number is checked against the evidence. Any failure → deterministic fallback report.
 
-## Visual layers on the map
-- **Existing tree canopy:** Tampa 2021 Tree Canopy MapServer layer 9, rendered as transparent map tiles and filtered to `LandCover = 'Tree Canopy'`.
-- **Potential planting zones:** Tampa 2021 Tree Canopy MapServer layer 10. These are study polygons, not field-approved planting sites.
-- **Historical heat zones:** Tampa 2021 MapServer layer 15 (`Tampa_avgLST_degF_SP`), an average land-surface-temperature raster. It is historical context, not live air temperature.
-- **Buildings and surface parking:** independent USF FeatureServer vector queries, filtered spatially using the official Tampa campus boundary.
+## Real vs estimated
+| Real (computed from source geometry) | Scenario / model | Not claimed |
+|---|---|---|
+| Path length, buffer area, canopy overlap, polygon areas, distances | Usable area, kWdc, PVWatts kWh (if key), rainwater m³, tree count | Temperature reduction, verified solar feasibility, actual savings, flood reduction, drainage/infiltration, cost |
 
-Use the quick buttons **Green zones**, **Campus assets**, and **Historical heat context** to switch thematic overlays. Or use the checkboxes to turn individual layers on and off.
+## Data sources
+Canopy: Tampa UTC 2021 layer 9 (USF Water Institute). Walkways/green space: USF Community Maps layers 11/18.
+Buildings/parking/boundary: USF ArcGIS FeatureServers. See `shared/sources.js` (the only URLs Gemini may cite).
+> Note: the plan names USF canopy layer 5; the base map uses Tampa 2021 layer 9. Swap in `src/lib/data.js` if layer 5 is preferred.
 
-## Data endpoints
-- USF campus boundary: `USF_Campus_Boundaries/FeatureServer/0`
-- USF building footprints: `USF_Building_Footprints/FeatureServer/1`
-- USF surface parking lots: `Parking_Lots_Garages/FeatureServer/1`
-- Tampa 2021 tree canopy and potential planting: `Tampa_2021_TreeCanopy/MapServer/9` and `/10`
-- Tampa 2021 average land-surface temperature: `Tampa_2021_TreeCanopy/MapServer/15`
+## Limits
+Geodesic WGS84 screening metrics, not surveyed. No hydrological model, structural/electrical review, shade-hour simulation.
+AI disclosure: Claude Code assisted development; Gemini writes proposal prose from supplied metrics only.
 
-## Important
-The satellite imagery is a backdrop only; analysis should use the independent GIS records. Regional 2021 study overlays may extend beyond campus at the map viewport edges. The vector asset queries use the campus boundary. The map is a prototype and does not yet calculate live temperature, energy production, stormwater behavior or structural solar suitability.
+## Layout
+`shared/` pure logic used by browser + server · `server/` Express (Gemini, PVWatts, GIS proxy, security) · `src/` React + MapLibre · `tests/` Vitest.
