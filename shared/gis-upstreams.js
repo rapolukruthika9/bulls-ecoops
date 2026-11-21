@@ -16,4 +16,4 @@ export const GIS_UPSTREAMS = {
 };
 
 /** Paths the proxy is willing to forward: layer metadata, layer query, MapServer export. */
-export const ALLOWED_GIS_PATH = /^\/(?:\d+(?:\/query)?|export)$/;
+export const ALLOWED_GIS_PATH = /^\/(?:\d+(?:\/query)?|export|legend)$/;

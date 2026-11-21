@@ -63,6 +63,10 @@ export function rankCandidates(items, terms, requestedWeights) {
 }
 
 export const MISSION_TERMS = {
+  plant: [
+    { key: 'area', label: 'Normalized open area', get: (c) => c.raw.mappedAreaM2, normalize: true },
+    { key: 'shape', label: 'Normalized compactness (plantable block)', get: (c) => c.raw.compactness, normalize: true },
+  ],
   green: [
     { key: 'exposure', label: 'Low-canopy exposure proxy', get: (c) => c.raw.lowCanopyPct / 100, normalize: false },
     { key: 'length', label: 'Normalized path length', get: (c) => c.raw.pathLengthM, normalize: true },
@@ -79,12 +83,14 @@ export const MISSION_TERMS = {
 };
 
 export const DEFAULT_WEIGHTS = {
+  plant: { area: 0.6, shape: 0.4 },
   green: { exposure: 0.7, length: 0.3 },
   solar: { area: 0.6, walk: 0.4 },
   water: { catchment: 0.4, paved: 0.3, green: 0.3 },
 };
 
 export const FORMULAS = {
+  plant: 'plant_screen_score = 100 × (w_area × normalized_open_area + w_shape × normalized_compactness)',
   green: 'green_score = 100 × (w_exposure × low_canopy_fraction + w_length × normalized_path_length)',
   solar: 'solar_screen_score = 100 × (w_area × normalized_usable_area + w_walk × normalized_path_adjacency)',
   water: 'water_screen_score = 100 × (w_catchment × normalized_catchment_area + w_paved × normalized_paved_area + w_green × normalized_green_space_adjacency)',

@@ -6,7 +6,7 @@
 // type SiteEvidence = { siteId, siteName, mission, intervention, metrics[], sourceIds[], assumptions{} }
 
 import {
-  solarCapacity, rainwaterCapture, rainGarden, plantingCount, ASSUMPTION_META,
+  solarCapacity, rainwaterCapture, rainGarden, plantingCount, plantingCountArea, ASSUMPTION_META,
 } from './scenarios.js';
 
 const round = (v, d = 2) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : v);
@@ -17,7 +17,7 @@ function metric(id, label, value, unit, method, sourceId, status) {
 
 /** Which scenario components apply to which candidate kind. */
 export function availableComponents(kind) {
-  if (kind === 'path') return ['planting'];
+  if (kind === 'path' || kind === 'openspace') return ['planting'];
   if (kind === 'parking') return ['solar', 'rainwater', 'raingarden'];
   if (kind === 'building') return ['solar', 'rainwater'];
   return [];
@@ -26,13 +26,14 @@ export function availableComponents(kind) {
 export function interventionName(kind, components) {
   const has = (c) => components.includes(c);
   if (kind === 'path') return 'green-corridor';
+  if (kind === 'openspace') return 'green-planting';
   if (has('solar') && (has('rainwater') || has('raingarden'))) return 'ecocanopy';
   if (has('solar')) return 'solar-canopy';
   if (has('rainwater') || has('raingarden')) return 'water-smart';
   return 'screening-only';
 }
 
-const KIND_SOURCE = { path: 'src-paths', parking: 'src-parking', building: 'src-buildings' };
+const KIND_SOURCE = { path: 'src-paths', parking: 'src-parking', building: 'src-buildings', openspace: 'src-openspace' };
 
 /**
  * @param {object} p
@@ -64,6 +65,20 @@ export function buildSiteEvidence({ candidate, components, assumptions, pv = nul
       metric('base.low_canopy_pct', 'Low-canopy exposure proxy', raw.lowCanopyPct, '%', '100 − canopy coverage %; proxy, not measured temperature', 'src-canopy', 'measured'),
     );
     useA('bufferM');
+  } else if (candidate.kind === 'openspace') {
+    sourceIds.add('src-buildings'); sourceIds.add('src-parking');
+    metrics.push(
+      metric('base.mapped_area_m2', 'Unbuilt open-space area', raw.mappedAreaM2, 'm²', 'Turf difference(): campus boundary − buffered buildings/parking/stadiums; area()', 'src-openspace', 'measured'),
+      metric('base.compactness', 'Compactness index (1 = circle)', raw.compactness, '', '4π × area ÷ perimeter²', 'src-openspace', 'measured'),
+    );
+    if (raw.exclusions) {
+      metrics.push(
+        metric('asm.excl_building_m', ASSUMPTION_META.buildingBufferM.label, raw.exclusions.buildingBufferM, 'm', 'Scan setting', 'src-assumption', 'assumption'),
+        metric('asm.excl_parking_m', ASSUMPTION_META.parkingBufferM.label, raw.exclusions.parkingBufferM, 'm', 'Scan setting', 'src-assumption', 'assumption'),
+        metric('asm.excl_athletic_m', ASSUMPTION_META.athleticBufferM.label, raw.exclusions.athleticBufferM, 'm', 'Scan setting', 'src-assumption', 'assumption'),
+      );
+      sourceIds.add('src-assumption');
+    }
   } else {
     metrics.push(
       metric('base.mapped_area_m2', candidate.kind === 'building' ? 'Building footprint area (roof proxy)' : 'Mapped parking surface area',
@@ -160,6 +175,20 @@ export function buildSiteEvidence({ candidate, components, assumptions, pv = nul
     );
   }
 
+  if (components.includes('planting') && candidate.kind === 'openspace') {
+    sourceIds.add('src-assumption');
+    ['plantingSpacingM', 'plantingAreaFractionPct'].forEach(useA);
+    const p = plantingCountArea({ areaM2: raw.mappedAreaM2, plantableFractionPct: a.plantingAreaFractionPct, spacingM: a.plantingSpacingM });
+    scenario.planting = p;
+    metrics.push(
+      metric('asm.planting_fraction_pct', ASSUMPTION_META.plantingAreaFractionPct.label, a.plantingAreaFractionPct, '%', 'User-declared', 'src-assumption', 'assumption'),
+      metric('asm.planting_spacing_m', ASSUMPTION_META.plantingSpacingM.label, a.plantingSpacingM, 'm', 'User-declared', 'src-assumption', 'assumption'),
+      metric('scn.planting_area_m2', 'Planted area (scenario)', p.plantingAreaM2, 'm²', 'open_area × planted_share', 'src-assumption', 'model'),
+      metric('scn.proposed_tree_count', 'Proposed tree count (scenario)', p.proposedTreeCount, 'trees',
+        'floor(planted_area ÷ spacing²); no canopy-growth, cooling or carbon claim', 'src-assumption', 'model'),
+    );
+  }
+
   if (components.includes('planting') && candidate.kind === 'path') {
     sourceIds.add('src-assumption');
     ['plantingSpacingM', 'plantingSides'].forEach(useA);
@@ -176,7 +205,7 @@ export function buildSiteEvidence({ candidate, components, assumptions, pv = nul
   const evidence = {
     siteId: candidate.id,
     siteName: candidate.name,
-    mission: candidate.mission || (candidate.kind === 'path' ? 'green' : components.includes('solar') ? 'solar' : 'water'),
+    mission: candidate.mission || (candidate.kind === 'openspace' ? 'plant' : candidate.kind === 'path' ? 'green' : components.includes('solar') ? 'solar' : 'water'),
     intervention: interventionName(candidate.kind, components),
     metrics,
     sourceIds: [...sourceIds],

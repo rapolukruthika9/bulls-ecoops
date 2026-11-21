@@ -20,9 +20,9 @@ const RANGE = {
   usableFractionPct: [0, 100, 5], panelDensityKwdcPerM2: [0.05, 0.3, 0.01], pvTiltDeg: [0, 60, 1], pvAzimuthDeg: [0, 359, 5],
   pvLossesPct: [0, 50, 1], rainfallMm: [0, 500, 1], runoffCoefficient: [0, 1, 0.05], collectionEfficiency: [0, 1, 0.05],
   storageCapacityM3: [0, 100000, 1], treatmentFraction: [0, 1, 0.05], diversionFraction: [0, 1, 0.05],
-  plantingSpacingM: [1, 30, 0.5], plantingSides: [1, 2, 1],
+  plantingSpacingM: [1, 30, 0.5], plantingSides: [1, 2, 1], plantingAreaFractionPct: [0, 100, 5],
 };
-const KIND_LABEL = { path: 'Walkway', parking: 'Parking lot', building: 'Building' };
+const KIND_LABEL = { path: 'Walkway', parking: 'Parking lot', building: 'Building', openspace: 'Open space' };
 
 const fmt = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
 
@@ -107,7 +107,7 @@ export default function PlannerPanel({
       {plan.components.map((c) => (
         <fieldset className="assumption-set" key={c}>
           <legend>{COMPONENT_LABEL[c]} — your assumptions</legend>
-          {FIELDS[c].map((key) => {
+          {(c === 'planting' && candidate.kind === 'openspace' ? ['plantingSpacingM', 'plantingAreaFractionPct'] : FIELDS[c]).map((key) => {
             const [min, max, step] = RANGE[key];
             const meta = ASSUMPTION_META[key];
             return (

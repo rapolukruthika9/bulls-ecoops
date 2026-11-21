@@ -30,8 +30,8 @@ export const MetricSchema = z.object({
 export const SiteEvidenceSchema = z.object({
   siteId: z.string().regex(/^[a-z]+-[A-Za-z0-9_.:-]{1,60}$/),
   siteName: z.string().max(120).transform((s) => sanitizeText(s)),
-  mission: z.enum(['green', 'solar', 'water']),
-  intervention: z.enum(['green-corridor', 'solar-canopy', 'water-smart', 'ecocanopy', 'screening-only', 'portfolio']),
+  mission: z.enum(['green', 'plant', 'solar', 'water']),
+  intervention: z.enum(['green-corridor', 'green-planting', 'solar-canopy', 'water-smart', 'ecocanopy', 'screening-only', 'portfolio']),
   metrics: z.array(MetricSchema).min(1).max(60),
   sourceIds: z.array(z.string().max(40)).min(1).max(20),
   assumptions: z.record(z.string().max(60), z.number().finite()),
@@ -249,6 +249,7 @@ export function buildFallbackProposal(evidence) {
   if (has('base.path_distance_m')) claim(`The site centroid is ${v('base.path_distance_m')} m from the nearest mapped path.`, ['base.path_distance_m']);
   if (has('base.green_distance_m')) claim(`The site centroid is ${v('base.green_distance_m')} m from mapped green space.`, ['base.green_distance_m']);
 
+  if (has('scn.planting_area_m2')) est('Planted area', 'scn.planting_area_m2');
   if (has('scn.usable_area_m2')) est('Usable candidate area', 'scn.usable_area_m2');
   if (has('scn.capacity_kwdc')) est('Assumed system capacity', 'scn.capacity_kwdc');
   if (has('scn.pv_ac_annual_kwh')) est('PVWatts modelled annual AC output', 'scn.pv_ac_annual_kwh');
@@ -259,6 +260,7 @@ export function buildFallbackProposal(evidence) {
   if (has('scn.proposed_tree_count')) est('Proposed tree count', 'scn.proposed_tree_count');
 
   const intro = {
+    'green-planting': 'Screen an unbuilt campus open space (outside buildings, parking and stadiums) for native shade-tree planting.',
     'green-corridor': 'Screen a pedestrian corridor with lower mapped canopy overlap for native shade planting.',
     'solar-canopy': 'Screen a mapped surface for a solar shade canopy or rooftop array.',
     'water-smart': 'Screen a mapped roof or paved surface for rainwater capture or a rain-garden concept.',
@@ -269,10 +271,12 @@ export function buildFallbackProposal(evidence) {
   const reviews = ['Facilities and campus planning review', 'Environmental health & safety / fire access review'];
   if (['solar-canopy', 'ecocanopy'].includes(evidence.intervention)) reviews.push('Structural and electrical interconnection engineering review', 'Shade and glare impact review');
   if (['water-smart', 'ecocanopy'].includes(evidence.intervention)) reviews.push('Stormwater / drainage and soil infiltration assessment', 'Utilities locate and underground-conflict review');
+  if (evidence.intervention === 'green-planting') reviews.push('Campus arborist species and maintenance review', 'Utilities locate and underground-conflict review', 'Irrigation, soil and stormwater assessment', 'Confirm the area is not a road, pond, athletic field or reserved land');
   if (evidence.intervention === 'green-corridor') reviews.push('Campus arborist species and maintenance review', 'Accessibility (ADA) path review');
 
   const monitoring = [];
   if (has('base.canopy_pct')) monitoring.push({ metric: 'Canopy coverage of corridor buffer', method: 'Repeat GIS overlap on updated canopy data', cadence: 'Annually' });
+  if (has('scn.proposed_tree_count')) monitoring.push({ metric: 'Tree survival and canopy cover', method: 'Field survey of planted trees and repeat canopy mapping', cadence: 'Annually' });
   if (has('scn.capacity_kwdc')) monitoring.push({ metric: 'Installed capacity and metered output', method: 'Inverter / utility meter readings (not available in this prototype)', cadence: 'Monthly' });
   if (has('scn.capture_m3')) monitoring.push({ metric: 'Measured captured volume', method: 'Tank level or flow meter after install', cadence: 'Per rain event' });
   if (!monitoring.length) monitoring.push({ metric: 'Site conditions', method: 'Field visit and measured baseline', cadence: 'Before any design work' });

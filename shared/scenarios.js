@@ -80,6 +80,15 @@ export function fixtureSavings({
   return { annualLitersSaved };
 }
 
+/** Proposed planting count in an open space from declared planting fraction and spacing. */
+export function plantingCountArea({ areaM2, plantableFractionPct, spacingM }) {
+  num('areaM2', areaM2, { min: 0 });
+  num('plantableFractionPct', plantableFractionPct, { min: 0, max: 100 });
+  num('spacingM', spacingM, { min: 0.5 });
+  const plantingAreaM2 = areaM2 * (plantableFractionPct / 100);
+  return { plantingAreaM2, proposedTreeCount: Math.floor(plantingAreaM2 / (spacingM * spacingM)) };
+}
+
 /** Proposed planting count along a corridor from declared spacing (no canopy-growth claim). */
 export function plantingCount({ pathLengthM, spacingM, sides }) {
   num('pathLengthM', pathLengthM, { min: 0 });
@@ -105,6 +114,7 @@ export const DEFAULT_ASSUMPTIONS = {
   diversionFraction: 0.5,
   plantingSpacingM: 8,
   plantingSides: 2,
+  plantingAreaFractionPct: 50,
   bufferM: 10,
 };
 
@@ -122,5 +132,9 @@ export const ASSUMPTION_META = {
   diversionFraction: { label: 'Diverted fraction of runoff', unit: '' },
   plantingSpacingM: { label: 'Tree spacing', unit: 'm' },
   plantingSides: { label: 'Planting sides of path', unit: '' },
+  plantingAreaFractionPct: { label: 'Share of open space planted', unit: '%' },
+  buildingBufferM: { label: 'Exclusion buffer around buildings', unit: 'm' },
+  parkingBufferM: { label: 'Exclusion buffer around parking', unit: 'm' },
+  athleticBufferM: { label: 'Exclusion buffer around stadiums/athletic buildings', unit: 'm' },
   bufferM: { label: 'Corridor buffer', unit: 'm' },
 };

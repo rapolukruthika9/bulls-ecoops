@@ -15,8 +15,8 @@ export const BrainstormContextSchema = z.object({
   sites: z.array(z.object({
     id: z.string().regex(/^[a-z]+-[A-Za-z0-9_.:-]{1,60}$/),
     name: z.string().max(120).transform((s) => sanitizeText(s)),
-    kind: z.enum(['path', 'parking', 'building']),
-    mission: z.enum(['green', 'solar', 'water']),
+    kind: z.enum(['path', 'parking', 'building', 'openspace']),
+    mission: z.enum(['green', 'plant', 'solar', 'water']),
     rank: z.number().int().min(1).max(100000),
     score: z.number().finite(),
   })).max(15),
@@ -169,6 +169,18 @@ export function buildFallbackIdeas(ctx) {
       why_here: area ? `It is a top water-screening candidate with ${fmt(area.value)} ${area.unit} of catchment or paved area.` : 'It is a top water-screening candidate.',
       data_backed: true, site_ids: [water.s.id], metric_ids: area ? [area.id] : [], effort: 'medium',
       validation_needed: ['Stormwater and soil infiltration assessment', 'Utilities and underground-conflict review'],
+    });
+  }
+  const open = pick('openspace', 'plant');
+  if (open) {
+    const area = metricsFor(open.i).find((m) => m.id.endsWith('.area_m2'));
+    ideas.push({
+      title: `Native shade planting at ${open.s.name}`,
+      category: 'green-heat',
+      description: 'Plant native shade trees on this unbuilt open space (clear of buildings, parking and stadiums) to add shade, habitat and a visible student-engagement project.',
+      why_here: area ? `It is a top-ranked open space with ${fmt(area.value)} ${area.unit} outside buildings and parking.` : 'It is a top-ranked open space outside buildings and parking.',
+      data_backed: true, site_ids: [open.s.id], metric_ids: area ? [area.id] : [], effort: 'medium',
+      validation_needed: ['Confirm land use and that it is not a road, pond or athletic field', 'Campus arborist species review', 'Utilities locate'],
     });
   }
   const general = [
